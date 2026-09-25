@@ -167,7 +167,7 @@ const ROLE_GROUPS = {
     bubble: ['bg', 'bw', 'bc', 'radius', 'padT', 'padB', 'padX', 'maxW', 'fsMin', 'fsMax'],
     colors: ['cText', 'cEm', 'cStrong', 'cQuote', 'cU', 'cLink'],
     text: ['offY', 'offX'],
-    names: ['nameX', 'nameY', 'datePos', 'dateX', 'dateY', 'nameSize', 'nameColor', 'nameNoWrap', 'nameWidth', 'dateSize', 'dateColor'],
+    names: ['nameCorner', 'nameX', 'nameY', 'datePos', 'dateX', 'dateY', 'nameSize', 'nameColor', 'nameNoWrap', 'nameWidth', 'dateSize', 'dateColor'],
     buttons: ['btnPlace', 'btnCorner', 'btnXMin', 'btnXMax', 'btnYMin', 'btnYMax', 'btnDir',
         'btnSMin', 'btnSMax', 'btnColor', 'btnOpacity', 'btnHover', 'btnBg', 'btnRadius', 'btnPad', 'btnGap', 'btnNoShadow',
         'edPlace', 'edCorner', 'edXMin', 'edXMax', 'edYMin', 'edYMax', 'edSize', 'edOpacity', 'edRadius', 'edGap'],
@@ -179,7 +179,9 @@ function roleDefaults() {
         bg: '', bw: 0, bc: '', radius: 0, padT: 0, padB: 0, padX: 0, maxW: 0, fsMin: 0, fsMax: 0,
         cText: '', cEm: '', cStrong: '', cQuote: '', cU: '', cLink: '',
         offY: 0, offX: 0,
-        nameX: 0, nameY: 0, datePos: '', dateX: 0, dateY: 0,
+        // nameCorner: '' — сдвиг от своего места; 'top-left' и т.д. — в углу
+        // пузыря, nameX / nameY — расстояние от его краёв
+        nameCorner: '', nameX: 0, nameY: 0, datePos: '', dateX: 0, dateY: 0,
         nameSize: 0, nameColor: '', nameNoWrap: false, nameWidth: 0,
         dateSize: 0, dateColor: '',
         // кнопки: где стоят ('' как в теме | row — в строке ника | after — сразу
@@ -343,12 +345,18 @@ const READ = {
         return o;
     },
     names(get, r) {
-        const [nameX, nameY] = tr(get(S.nameRow(r), 'transform'));
+        const corner = get(S.nameRow(r), '--vte-corner');
+        let [nameX, nameY] = tr(get(S.nameRow(r), 'transform'));
+        if (corner) {
+            const [cy, cx] = corner.split('-');
+            nameX = num(get(S.nameRow(r), cx));
+            nameY = num(get(S.nameRow(r), cy));
+        }
         const [dateX, dateY] = tr(get(S.date(r), 'transform'));
         const basis = get(S.date(r), 'flex-basis');
         const order = get(S.date(r), 'order');
         return {
-            nameX, nameY, dateX, dateY,
+            nameCorner: corner, nameX, nameY, dateX, dateY,
             datePos: basis === '100%' ? (order === '-1' ? 'above' : 'below') : (order === '-1' ? 'before' : ''),
             nameSize: num(get(S.nameText(r), 'font-size')),
             nameColor: get(S.nameText(r), 'color'),
@@ -360,7 +368,7 @@ const READ = {
     },
 };
 
-const isEmpty = (o) => Object.entries(o).every(([k, v]) => !v || /Corner$/.test(k));
+const isEmpty = (o) => Object.entries(o).every(([k, v]) => !v || /^(btn|ed)Corner$/.test(k));
 
 function readState() {
     const s = defaults();
@@ -377,7 +385,7 @@ function readState() {
         const split = !isEmpty(bot) || !isEmpty(user);
         s.link[g] = !split;
         const merge = (a, b) => Object.fromEntries(Object.keys(a).map(k => [k, b[k] || a[k]]));
-        const fix = (o) => { for (const k of Object.keys(o)) if (/Corner$/.test(k) && !o[k]) o[k] = 'top-right'; return o; };
+        const fix = (o) => { for (const k of Object.keys(o)) if (/^(btn|ed)Corner$/.test(k) && !o[k]) o[k] = 'top-right'; return o; };
         Object.assign(s.bot, fix(split ? merge(all, bot) : all));
         Object.assign(s.user, fix(split ? merge(all, user) : all));
     }
@@ -448,6 +456,9 @@ function buildRules(s) {
             put(box, 'padding-left', px(w?.padX));
             put(box, 'padding-right', px(w?.padX));
             put(box, 'max-width', w && w.maxW ? `${w.maxW}%` : '');
+            // Сообщаем отступ «Аватаркам»: во всю ширину — до этой рамки
+            put(box, '--vte-mes-pl', t === 'mes' && w?.padX ? `${w.padX}px` : '');
+            put(box, '--vte-mes-pr', t === 'mes' && w?.padX ? `${w.padX}px` : '');
             put(box, 'box-sizing', w && (w.padX || w.bw || w.maxW) ? 'border-box' : '');
         }
         // Размер текста: ST считает высоту строки от --mainFontSize, поэтому
@@ -486,14 +497,24 @@ function buildRules(s) {
 
     /* ---------- ник и дата ---------- */
     let nameMovedAny = false;
+    // Какие роли используют блок с текстом как опору (угол пузыря)
+    const blockRel = { all: false, bot: false, user: false };
     each('names', (r, v) => {
-        const moved = !!(v && (v.nameX || v.nameY));
-        if (moved) nameMovedAny = true;
+        const corner = v?.nameCorner || '';
+        const moved = !!(v && (v.nameX || v.nameY)) && !corner;
+        if (moved || corner) nameMovedAny = true;
+        if (corner) blockRel[r] = true;
+        const [cy, cx] = corner ? corner.split('-') : [];
         const dp = v?.datePos || '';
         const wrapDate = dp === 'below' || dp === 'above';
+        put(S.nameRow(r), '--vte-corner', corner);
         put(S.nameRow(r), 'transform', moved ? `translate(${v.nameX}px, ${v.nameY}px)` : '');
-        put(S.nameRow(r), 'position', moved ? 'relative' : '');
-        put(S.nameRow(r), 'z-index', moved ? '4' : '');
+        put(S.nameRow(r), 'position', corner ? 'absolute' : moved ? 'relative' : '');
+        put(S.nameRow(r), 'z-index', moved || corner ? '4' : '');
+        for (const side of ['top', 'bottom', 'left', 'right']) {
+            const d = side === cy ? v.nameY : side === cx ? v.nameX : null;
+            put(S.nameRow(r), side, corner && d != null ? `${d}px` : '');
+        }
         put(S.nameRow(r), 'display', dp ? 'flex' : '');
         put(S.nameRow(r), 'align-items', dp ? 'baseline' : '');
         put(S.nameRow(r), 'column-gap', dp ? '6px' : '');
@@ -545,7 +566,7 @@ function buildRules(s) {
         const pb = placeBox(S.btns(r), 'btn');
         const pe = placeBox(S.edit(r), 'ed');
         // опора для «в углу блока с текстом»
-        put(S.box(r, 'block'), 'position', pb === 'block' || pe === 'block' ? 'relative' : '');
+        if (pb === 'block' || pe === 'block') blockRel[r] = true;
         // «сразу после ника»
         const after = pb === 'after' || pe === 'after';
         put(S.nameBox(r), 'flex-grow', after ? '0' : '');
@@ -573,6 +594,9 @@ function buildRules(s) {
         put(S.editBtn(r), 'opacity', v?.edOpacity ? String(r2(v.edOpacity / 100)) : '');
         put(S.editBtn(r), 'border-radius', px(v?.edRadius));
     });
+
+    // Опора для «в углу пузыря» (ник, кнопки) — одна строка на роль
+    for (const r of ROLES) put(S.box(r, 'block'), 'position', blockRel[r] ? 'relative' : '');
 
     /* ---------- значки кнопок ---------- */
     for (const [, list] of GLYPHS) {
@@ -776,7 +800,19 @@ function slider(key, min, max, unit, zeroText, hint) {
         },
     });
     show();
-    return h('span.vte-tb-slider', {}, [input, out]);
+    // ↺ — вернуть «как в теме». Видна, только когда значение изменено
+    const def = ((GROUP_OF[key] ? roleDefaults() : defaults())[key] ?? 0);
+    const reset = iconBtn('fa-rotate-left', 'Сбросить эту настройку', () => {
+        setVal(key, def);
+        input.value = String(def || 0);
+        show();
+        sync();
+        commit();
+    }, 'vte-tb-mini.vte-tb-reset');
+    const sync = () => reset.classList.toggle('vte-tb-reset-off', ((val(key) || 0)) === def);
+    input.addEventListener('input', sync);
+    sync();
+    return h('span.vte-tb-slider', {}, [input, out, reset]);
 }
 
 /** Пара «телефон / ПК» со связкой */
@@ -829,8 +865,22 @@ function pair(title, aKey, bKey, max, hint, min = 0, zeroText = 'как в те�
         },
     }, [ic, txt]);
 
+    // ↺ — сбросить обе (телефон и ПК)
+    const defA = ((GROUP_OF[aKey] ? roleDefaults() : defaults())[aKey] ?? 0), defB = ((GROUP_OF[bKey] ? roleDefaults() : defaults())[bKey] ?? 0);
+    const resetBoth = iconBtn('fa-rotate-left', 'Сбросить телефон и ПК', () => {
+        setVal(aKey, defA);
+        setVal(bKey, defB);
+        A.show(); B.show();
+        k = ratio();
+        syncBoth();
+        commit();
+    }, 'vte-tb-mini.vte-tb-reset');
+    const syncBoth = () => resetBoth.classList.toggle('vte-tb-reset-off', (val(aKey) || 0) === defA && (val(bKey) || 0) === defB);
+    A.input.addEventListener('input', syncBoth);
+    B.input.addEventListener('input', syncBoth);
+    syncBoth();
     return h('div.vte-tb-sizes', { title: hint || '' }, [
-        h('div.vte-tb-sizes-head', {}, [h('span.vte-tb-label', { text: title }), link]),
+        h('div.vte-tb-sizes-head', {}, [h('span.vte-tb-label', { text: title }), link, resetBoth]),
         A.row, B.row,
     ]);
 }
@@ -977,9 +1027,14 @@ function screen() {
 
         group('names', 'Ник и дата', [
             roleBar('names'),
-            h('small.vte-note', { text: 'Ник двигается от своего места, дата привязана к нику и едет вместе с ним.' }),
-            row('Ник вбок', slider('nameX', -600, 600, 'px', 'на месте')),
-            row('Ник вверх-вниз', slider('nameY', -600, 600, 'px', 'на месте')),
+            magnet('Привязать к ближайшему', anchorName,
+                'Сначала поставьте ник, куда нужно, — кнопка найдёт ближайший угол пузыря и посчитает отступы сама'),
+            row('Привязка', select('nameCorner', [['', 'от своего места'], ...CORNERS.map(([v, t]) => [v, `в углу пузыря ${t}`])], render)),
+            h('small.vte-note', { text: val('nameCorner')
+                ? 'Ник держится за угол пузыря — на любом экране встаёт на то же расстояние от его краёв. Дата едет вместе с ником.'
+                : 'Ник двигается от своего места, дата привязана к нику и едет вместе с ним.' }),
+            row(val('nameCorner') ? 'От края по горизонтали' : 'Ник вбок', slider('nameX', -600, 600, 'px', val('nameCorner') ? 'вплотную' : 'на месте')),
+            row(val('nameCorner') ? 'От края по вертикали' : 'Ник вверх-вниз', slider('nameY', -600, 600, 'px', val('nameCorner') ? 'вплотную' : 'на месте')),
             row('Дата относительно ника', select('datePos', [
                 ['', 'справа от ника (как в теме)'], ['below', 'под ником'], ['above', 'над ником'], ['before', 'перед ником'],
             ])),
@@ -997,6 +1052,8 @@ function screen() {
         group('buttons', 'Кнопки сообщения', buttonsUi()),
 
         group('badges', 'Бейджи (номер, время, токены)', [
+            magnet('Привязать к ближайшему', anchorBadges,
+                'Найдёт ближайший край аватарки и выравнивание — бейджи останутся на месте, но будут держаться за аватарку'),
             row('Как расставить', select('badgeMode', [
                 ['', 'как в теме'],
                 ['onBottom', 'на аватарке, снизу'], ['onTop', 'на аватарке, сверху'],
@@ -1082,6 +1139,8 @@ function buttonsUi() {
             text: 'Видимых кнопок две: «…» и карандаш. «…» раскрывает остальные — они едут вместе с ними. '
                 + 'Кнопки правки появляются, пока сообщение редактируется, и настраиваются отдельно.',
         }),
+        magnet('Привязать к ближайшему', () => anchorButtons('btn'),
+            'Найдёт ближайший угол пузыря и посчитает отступы — кнопки останутся на месте, но будут держаться за угол'),
         ...placeRows('btn', 'Где стоят'),
         row('Раскладка', select('btnDir', [['', 'в строку'], ['column', 'столбиком']])),
         pair('Размер значков', 'btnSMin', 'btnSMax', 40),
@@ -1095,6 +1154,7 @@ function buttonsUi() {
         check('btnNoShadow', 'Без тени под значками (легче)'),
 
         h('div.vte-bb-shared', { text: 'Кнопки в режиме правки' }),
+        magnet('Привязать к ближайшему', () => anchorButtons('ed'), 'То же для кнопок правки'),
         ...placeRows('ed', 'Где стоят'),
         row('Размер кнопок', slider('edSize', 0, 60, 'px', 'как в теме')),
         row('Видимость', slider('edOpacity', 0, 100, '%', 'как в теме (50%)')),
@@ -1257,6 +1317,154 @@ function svgData(codeText) {
     if (!/xmlns=/.test(svg)) svg = svg.replace(/<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"');
     return `data:image/svg+xml,${svg.replace(/"/g, "'").replace(/[%#<>{}\n\r;]/g, (c) => encodeURIComponent(c))}`;
 }
+
+/* ============================================================
+   ПРИВЯЗАТЬ К БЛИЖАЙШЕМУ
+   Смотрим, где элемент стоит сейчас на живом сообщении, выбираем
+   ближайший угол опоры (пузыря — для ника и кнопок, аватарки — для
+   бейджей) и привязываем к нему. Затем сразу применяем, меряем ещё раз
+   и поправляем отступ на разницу — элемент остаётся ровно там, где был,
+   но теперь держится за угол и едет вместе с ним на любом экране.
+============================================================ */
+function sampleMes(g) {
+    const r = !g || state.link[g] ? 'bot' : state.role;
+    const list = [...document.querySelectorAll(`#chat .mes[is_user="${r === 'user' ? 'true' : 'false'}"]:not(.smallSysMes)`)];
+    const onScreen = list.filter(m => { const b = m.getBoundingClientRect(); return b.bottom > 0 && b.top < innerHeight; });
+    return onScreen[onScreen.length - 1] || list[list.length - 1] || null;
+}
+
+/** Ближайший угол опоры и расстояния до её краёв. Для absolute-позиции
+    отсчёт идёт от внутреннего края опоры (без рамки) и учитывает поля
+    самого элемента — поэтому элемент встаёт ровно туда, где его видно */
+function nearestCorner(el, boxEl) {
+    const r = el.getBoundingClientRect();
+    const b = boxEl.getBoundingClientRect();
+    const bc = getComputedStyle(boxEl), ec = getComputedStyle(el);
+    const px = (v) => parseFloat(v) || 0;
+    const d = {
+        left: r.left - (b.left + px(bc.borderLeftWidth)) - px(ec.marginLeft),
+        right: (b.right - px(bc.borderRightWidth)) - r.right - px(ec.marginRight),
+        top: r.top - (b.top + px(bc.borderTopWidth)) - px(ec.marginTop),
+        bottom: (b.bottom - px(bc.borderBottomWidth)) - r.bottom - px(ec.marginBottom),
+    };
+    const y = d.top <= d.bottom ? 'top' : 'bottom';
+    const x = d.left <= d.right ? 'left' : 'right';
+    return { corner: `${y}-${x}`, x, y, dx: Math.round(d[x]), dy: Math.round(d[y]) };
+}
+
+/** «12px от края, на 6px выше пузыря» — понятно и при отрицательных */
+function distText(n) {
+    const x = n.dx >= 0 ? `${n.dx}px от края` : `на ${-n.dx}px за краем`;
+    const y = n.dy >= 0 ? `${n.dy}px ${n.y === 'top' ? 'от верха' : 'от низа'}`
+        : `на ${-n.dy}px ${n.y === 'top' ? 'выше' : 'ниже'} пузыря`;
+    return `${x}, ${y}`;
+}
+
+const CORNER_RU = { 'top-left': 'левому верхнему', 'top-right': 'правому верхнему', 'bottom-left': 'левому нижнему', 'bottom-right': 'правому нижнему' };
+
+/* В ST у элементов плавная анимация (transition) — сразу после смены
+   элемент ещё «едет», и замер попадает в середину пути. На время замера
+   анимации выключаем: всё встаёт в конечное положение мгновенно */
+let freezeStyle = null;
+function freeze(on) {
+    if (on) {
+        freezeStyle ||= document.head.appendChild(document.createElement('style'));
+        freezeStyle.textContent = '#chat *, #chat *::before, #chat *::after{transition:none!important;animation:none!important}';
+    } else {
+        freezeStyle?.remove();
+        freezeStyle = null;
+    }
+}
+
+function anchorName() {
+    freeze(true);
+    try { anchorNameNow(); } finally { freeze(false); }
+}
+
+function anchorNameNow() {
+    const m = sampleMes('names');
+    const el = m?.querySelector('.ch_name .alignItemsBaseline');
+    const box = m?.querySelector('.mes_block');
+    if (!el || !box) { say('Не нашла сообщение в чате — откройте чат'); return; }
+    const n = nearestCorner(el, box);
+    setVal('nameCorner', n.corner);
+    setVal('nameX', n.dx);
+    setVal('nameY', n.dy);
+    commit();
+    render();
+    say(`Ник привязан к ${CORNER_RU[n.corner]} углу пузыря: ${distText(n)}`);
+}
+
+function anchorButtons(pre) {
+    freeze(true);
+    try { anchorButtonsNow(pre); } finally { freeze(false); }
+}
+
+function anchorButtonsNow(pre) {
+    const m = sampleMes('buttons');
+    const el = m?.querySelector(pre === 'btn' ? '.mes_buttons' : '.mes_edit_buttons');
+    const box = m?.querySelector('.mes_block');
+    if (!el || !box) { say('Не нашла сообщение в чате — откройте чат'); return; }
+    // Кнопки правки видны только при правке — на время замера показываем
+    const temp = !el.getBoundingClientRect().width && !hiddenShown;
+    if (temp) showHidden(true);
+    if (!el.getBoundingClientRect().width) { if (temp) showHidden(false); say('Кнопок сейчас не видно — отметьте «Показать скрытые кнопки»'); return; }
+    const n = nearestCorner(el, box);
+    if (temp) showHidden(false);
+    const set = (k, v) => { setVal(`${pre}${k}Min`, v); setVal(`${pre}${k}Max`, v); };
+    setVal(`${pre}Place`, 'block');
+    setVal(`${pre}Corner`, n.corner);
+    set('X', n.dx);
+    set('Y', n.dy);
+    commit();
+    render();
+    say(`${pre === 'btn' ? 'Кнопки' : 'Кнопки правки'} привязаны к ${CORNER_RU[n.corner]} углу пузыря: ${distText(n)}`);
+}
+
+/* Бейджи лежат в сетке аватарки — где они встанут, заранее не посчитать.
+   Записываем привязку, меряем по-настоящему и, если бейджи сдвинулись,
+   дописываем поправку, чтобы они остались, где были */
+async function anchorBadges() {
+    const m = sampleMes();
+    const av = m?.querySelector('.mesAvatarWrapper .avatar');
+    const union = () => {
+        const rs = [...(m?.querySelectorAll('.mesAvatarWrapper > :is(.mesIDDisplay, .mes_timer, .tokenCounterDisplay)') || [])]
+            .filter(e => e.textContent.trim() && e.getBoundingClientRect().width).map(e => e.getBoundingClientRect());
+        return rs.length ? { left: Math.min(...rs.map(r => r.left)), top: Math.min(...rs.map(r => r.top)),
+            right: Math.max(...rs.map(r => r.right)), bottom: Math.max(...rs.map(r => r.bottom)) } : null;
+    };
+    freeze(true);
+    const was = union();
+    const a = av?.getBoundingClientRect();
+    freeze(false);
+    if (!a || !was) { say('Бейджей не видно — включите их в настройках SillyTavern'); return; }
+    const cx = (was.left + was.right) / 2, cy = (was.top + was.bottom) / 2;
+    const inside = was.top < a.bottom - 2 && was.bottom > a.top + 2;
+    // На аватарке — к её ближнему краю; под ней — стопкой под аватаркой
+    state.badgeMode = inside ? (cy < a.top + a.height / 2 ? 'onTop' : 'onBottom') : (was.bottom <= a.top ? 'onTop' : 'stack');
+    state.badgeAlign = cx < a.left + a.width / 3 ? 'start' : cx > a.right - a.width / 3 ? 'end' : 'center';
+    state.badgeX = 0;
+    state.badgeY = 0;
+    state.on = true;
+    await commit();
+    freeze(true);
+    const now = union();
+    const a2 = av.getBoundingClientRect();
+    freeze(false);
+    if (now) {
+        // Относительно своей аватарки: чат выше мог сдвинуться — это не в счёт
+        const dx = Math.round((was.left - a.left) - (now.left - a2.left));
+        const dy = Math.round((was.top - a.top) - (now.top - a2.top));
+        if (Math.abs(dx) > 1 || Math.abs(dy) > 1) { state.badgeX = dx; state.badgeY = dy; await commit(); }
+    }
+    render();
+    const where = { onTop: 'к верху аватарки', onBottom: 'к низу аватарки', stack: 'под аватаркой' }[state.badgeMode];
+    const side = { start: 'слева', center: 'по центру', end: 'справа' }[state.badgeAlign];
+    say(`Бейджи привязаны ${where}, ${side}`);
+}
+
+const magnet = (text, fn, hint) => h('button.vte-btn.vte-bb-magnet', { type: 'button', title: hint, on: { click: fn } },
+    [icon('fa-magnet'), h('span', { text: ` ${text}` })]);
 
 let themeOpen = false;
 function themeSection() {

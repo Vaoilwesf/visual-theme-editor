@@ -38,6 +38,7 @@ const SEL = {
     wrap: '.mes .mesAvatarWrapper',
     av: '.mes .avatar',
     img: '.mes .avatar img',
+    ring: '.mes .avatar::before',             // обводка по контуру фигуры
     back: '.mes .mesAvatarWrapper::after',    // подложка
     over: '.mes .mesAvatarWrapper::before',   // слой поверх
     banner: '.mes::before',                   // шапка позади сообщения
@@ -57,7 +58,28 @@ const SEL = {
     stair2: '.mes .mesAvatarWrapper > :is(.mesIDDisplay, .mes_timer, .tokenCounterDisplay):not(:empty) ~ :is(.mesIDDisplay, .mes_timer, .tokenCounterDisplay):not(:empty) ~ :is(.mesIDDisplay, .mes_timer, .tokenCounterDisplay):not(:empty)',
     text: '.mes .mes_text',
     name: '.mes .ch_name',
+    // Зеркально у пользователя: аватарка с другой стороны пузыря
+    uMes: '.mes[is_user="true"]',
+    uWrap: '.mes[is_user="true"] .mesAvatarWrapper',
+    uBlock: '.mes[is_user="true"] .mes_block',
 };
+
+/* Привязка аватарки к пузырю. Всё — обычным потоком: браузер сам ставит
+   аватарку рядом с пузырём с нужной стороны, отступ между ними — gap.
+   Никаких пикселей «от угла экрана», поэтому ничего не уезжает ни на
+   телефоне, ни на ПК, ни при смене ширины чата в самой таверне. */
+const PLACES = [
+    ['', 'свободно (ползунок «По ширине»)'],
+    ['left', 'слева от пузыря'],
+    ['right', 'справа от пузыря'],
+    ['top-left', 'над пузырём слева'],
+    ['top-center', 'над пузырём по центру'],
+    ['top-right', 'над пузырём справа'],
+];
+const MIRROR = { left: 'right', right: 'left', 'top-left': 'top-right', 'top-right': 'top-left', 'top-center': 'top-center' };
+const SELF = { 'top-left': 'flex-start', 'top-center': 'center', 'top-right': 'flex-end' };
+
+const RATIOS = [['1 / 1', 'квадрат'], ['4 / 5', 'почти квадрат'], ['3 / 4', 'портрет'], ['2 / 3', 'высокий портрет'], ['16 / 9', 'широкая']];
 
 /* Текст сообщений: бот и пользователь отдельно.
    Вверх-вниз — это отступ под строкой с ником. Под ней идёт то, что есть:
@@ -196,9 +218,19 @@ function defaults() {
         bannerFade: 0, bannerBlur: 0,
         bannerRing: 0, bannerRingColor: '',
         bannerClip: true,
+        bannerFit: 'native',       // native — родной размер (чётко) | width — растянуть по ширине
+        bannerNatW: 0, bannerNatH: 0,  // родной размер картинки (узнаём при вставке)
 
         /* ---- раскладка ---- (ник, бейджи, текст и сам пузырь — в окне «Пузыри») */
         below: false,
+        place: '',                 // привязка к пузырю, см. PLACES
+        gapMin: 0, gapMax: 0,      // расстояние до пузыря: телефон → ПК
+        mirrorUser: false,         // у пользователя — с другой стороны
+
+        /* ---- ширина чата, вытягивание, растворение ---- */
+        bindChat: false, wPct: 30, ratio: '3 / 4',
+        growMin: 0, growMax: 0,    // растянуть вниз: телефон → ПК
+        fade: 0,                   // растворение книзу, %
     };
 }
 
@@ -215,6 +247,16 @@ function readFluid(v) {
     if (m) return { min: Math.round(+m[1]), max: Math.round(+m[2]) };
     const p = String(v || '').match(/^(-?\d+(?:\.\d+)?)px$/);
     return p ? { min: Math.round(+p[1]), max: Math.round(+p[1]) } : { min: 0, max: 0 };
+}
+
+/** Внутренний отступ сообщения в теме (слева, справа) — у живого сообщения */
+function mesPadding() {
+    try {
+        const m = document.querySelector('#chat .mes:not(.smallSysMes)');
+        if (!m) return { l: 10, r: 10 };
+        const c = getComputedStyle(m);
+        return { l: Math.round(parseFloat(c.paddingLeft) || 0), r: Math.round(parseFloat(c.paddingRight) || 0) };
+    } catch { return { l: 10, r: 10 }; }
 }
 
 /** Из какого угла отсчитывается положение */
@@ -235,13 +277,29 @@ function readState() {
     s.on = true;
 
     const wRaw = get(SEL.wrap, 'width');
-    s.full = wRaw === '100%';
+    s.full = wRaw === '100%' || wRaw.startsWith('calc(100% +');
+    const pctW = wRaw.match(/^(\d+)%$/);
+    if (pctW && !s.full) {
+        s.bindChat = true;
+        s.wPct = +pctW[1];
+        s.ratio = get(SEL.av, 'aspect-ratio') || s.ratio;
+    }
     const w = readFluid(wRaw);
     s.wMin = w.min; s.wMax = w.max;
-    const hh = readFluid(get(SEL.av, 'height'));
+    const hh = readFluid(get(SEL.av, '--vte-av-h') || get(SEL.av, 'height'));
     s.hMin = hh.min; s.hMax = hh.max;
+    const gr = readFluid(get(SEL.av, '--vte-av-grow'));
+    s.growMin = gr.min; s.growMax = gr.max;
+    const fd = (get(SEL.img, 'mask') || get(SEL.img, '-webkit-mask')).match(/#000\s+(\d+)%,\s*transparent/);
+    s.fade = fd ? 100 - +fd[1] : 0;
 
-    const mask = urlOf(get(SEL.av, 'mask') || get(SEL.av, '-webkit-mask'));
+    s.place = get(SEL.mes, '--vte-av-place');
+    s.mirrorUser = !!get(SEL.uMes, '--vte-av-mirror');
+    const g = readFluid(get(SEL.mes, 'row-gap') || get(SEL.mes, 'column-gap'));
+    s.gapMin = g.min; s.gapMax = g.max;
+
+    // Маска раньше стояла на самой аватарке, теперь — на картинке внутри
+    const mask = urlOf(get(SEL.img, 'mask') || get(SEL.img, '-webkit-mask') || get(SEL.av, 'mask') || get(SEL.av, '-webkit-mask'));
     if (mask) {
         const known = SHAPES.find(x => x.path && mask.includes(x.path.slice(0, 18)));
         s.shape = known ? known.id : 'custom';
@@ -258,7 +316,9 @@ function readState() {
     if (shift) { s.dx = +shift[1]; s.dy = +shift[2]; }
 
     const ring = get(SEL.av, 'outline').match(/^(\d+(?:\.\d+)?)px\s+solid\s+(.+)$/);
-    if (ring) { s.ring = +ring[1]; s.ringColor = ring[2]; }
+    const ringIn = get(SEL.ring, 'inset').match(/^-(\d+)px$/);
+    if (ring) { s.ring = +ring[1]; s.ringColor = ring[2] === 'currentColor' ? '' : ring[2]; }
+    else if (ringIn) { s.ring = +ringIn[1]; const c = get(SEL.ring, 'background-color'); s.ringColor = c === 'currentColor' ? '' : c; }
 
     /* подложка */
     s.backImg = urlOf(get(SEL.back, 'background-image'));
@@ -290,7 +350,16 @@ function readState() {
     s.bannerOn = !!s.bannerImg;
     const bh = readFluid(get(SEL.banner, 'height'));
     s.bannerHMin = bh.min; s.bannerHMax = bh.max;
-    s.bannerScale = num(get(SEL.banner, 'background-size')) || 100;
+    const natM = get(SEL.banner, '--vte-banner-nat').match(/^(\d+)x(\d+)$/);
+    if (natM) {
+        s.bannerFit = 'native';
+        s.bannerNatW = +natM[1]; s.bannerNatH = +natM[2];
+        const wm = get(SEL.banner, 'width').match(/(\d+)px\)$/);
+        s.bannerScale = wm ? Math.round(+wm[1] / s.bannerNatW * 100) : 100;
+    } else {
+        s.bannerFit = s.bannerImg ? 'width' : 'native';   // шапки старой версии — как были
+        s.bannerScale = num(get(SEL.banner, 'background-size')) || 100;
+    }
     const bp = get(SEL.banner, 'background-position').match(/(-?\d+(?:\.\d+)?)%\s+(-?\d+(?:\.\d+)?)%/);
     if (bp) { s.bannerX = +bp[1]; s.bannerY = +bp[2]; }
     s.bannerRadius = num(get(SEL.banner, 'border-radius'));
@@ -299,8 +368,8 @@ function readState() {
     const fade = get(SEL.banner, 'mask-image').match(/#000\s+(\d+)%/);
     s.bannerFade = fade ? 100 - +fade[1] : 0;
     const bnr = get(SEL.banner, 'outline').match(/^(\d+(?:\.\d+)?)px\s+solid\s+(.+)$/);
-    if (bnr) { s.bannerRing = +bnr[1]; s.bannerRingColor = bnr[2]; }
-    s.bannerClip = get(SEL.mes, 'overflow') === 'hidden';
+    if (bnr) { s.bannerRing = +bnr[1]; s.bannerRingColor = bnr[2] === 'currentColor' ? '' : bnr[2]; }
+    s.bannerClip = /^(hidden|clip)$/.test(get(SEL.mes, 'overflow'));
 
     /* раскладка */
     s.below = get(SEL.mes, 'flex-direction') === 'column';
@@ -337,31 +406,64 @@ function buildRules(s) {
     const put = (sel, prop, val) => { (rules[sel] ||= {})[prop] = val; };
     const on = s.on;
 
-    /* ---------- раскладка и текст ---------- */
-    put(SEL.mes, 'flex-direction', on && s.below ? 'column' : '');
-    put(SEL.mes, 'align-items', on && s.below ? 'flex-start' : '');
-    put(SEL.block, 'width', on && s.below ? '100%' : '');
-    put(SEL.block, 'padding-left', on && s.below ? '0' : '');
+    /* ---------- раскладка и привязка к пузырю ---------- */
+    const place = on ? (s.place || '') : '';
+    const below = on && (s.below || place.startsWith('top'));
+    const side = place === 'left' || place === 'right';
+    // Отступ до пузыря: если не задан — как в ST (10px). В столбик — вертикальный
+    const gap = place ? (fluid(s.gapMin, s.gapMax) || (place === 'right' || !below ? '10px' : '')) : '';
+    put(SEL.mes, '--vte-av-place', place);
+    put(SEL.mes, 'flex-direction', below ? 'column' : place === 'right' ? 'row-reverse' : '');
+    put(SEL.mes, 'align-items', below ? 'flex-start' : '');
+    put(SEL.mes, 'column-gap', side && gap ? gap : '');
+    put(SEL.mes, 'row-gap', below && place && gap ? gap : '');
+    put(SEL.wrap, 'align-self', below && SELF[place] && SELF[place] !== 'flex-start' ? SELF[place] : '');
+    put(SEL.block, 'width', below ? '100%' : '');
+    // В ST отступ между аватаркой и текстом — padding-left у блока. При
+    // привязке его заменяет gap: он всегда между ними, с какой бы стороны
+    put(SEL.block, 'padding-left', below || (side && gap) ? '0' : '');
+
+    // Зеркально у пользователя
+    const mir = on && s.mirrorUser && place ? MIRROR[place] : '';
+    put(SEL.uMes, '--vte-av-mirror', mir ? '1' : '');
+    put(SEL.uMes, 'flex-direction', mir === 'left' ? 'row' : mir === 'right' ? 'row-reverse' : '');
+    put(SEL.uMes, 'column-gap', mir && side ? (gap || '10px') : '');
+    put(SEL.uBlock, 'padding-left', mir && side ? '0' : '');
+    put(SEL.uWrap, 'align-self', mir && SELF[mir] ? SELF[mir] : '');
     // Старый общий сдвиг всего блока (двигал и ник) — стираем
     put(SEL.block, 'margin-top', '');
     put(SEL.block, 'margin-left', '');
 
     // Текст под аватаркой: убираем дыру у последнего сообщения, а место
     // для стрелок свайпа оставляем под текстом, когда стрелки видны
-    put(TXT.lastWrap, 'padding-bottom', on && s.below ? '0' : '');
-    put(TXT.lastSwipes, 'padding-bottom', on && s.below
+    put(TXT.lastWrap, 'padding-bottom', below ? '0' : '');
+    put(TXT.lastSwipes, 'padding-bottom', below
         ? 'calc(25px + var(--swipeCounterHeight, 15px) + var(--swipeCounterMargin, 5px))' : '');
 
 
     /* ---------- аватарка ---------- */
-    const w = s.full ? '100%' : fluid(s.wMin, s.wMax);
-    const hgt = fluid(s.hMin, s.hMax);
+    // Привязка к ширине чата: ширина в % от сообщения, высота — пропорцией.
+    // Меняешь ширину чата в таверне — аватарка меняется вместе с ней
+    const bind = on && !s.full && s.bindChat && s.wPct;
+    // Во всю ширину — до рамки пузыря: заходим на внутренний отступ
+    // сообщения. Его берём у живого сообщения в теме, а если отступ задан
+    // в «Пузырях» — оттуда (переменная --vte-mes-pl / --vte-mes-pr)
+    const pad = s.full ? mesPadding() : null;
+    const pl = pad ? `var(--vte-mes-pl, ${pad.l}px)` : '';
+    const pr = pad ? `var(--vte-mes-pr, ${pad.r}px)` : '';
+    const w = s.full ? `calc(100% + ${pl} + ${pr})` : bind ? `${s.wPct}%` : fluid(s.wMin, s.wMax);
+    const baseH = fluid(s.hMin, s.hMax);
+    // Растянуть вниз: к обычной высоте добавляется запас, картинка и маска тянутся
+    const grow = on && !bind ? fluid(s.growMin, s.growMax) : '';
+    const hgt = bind ? 'auto' : grow ? `calc(${baseH || 'var(--avatar-base-height)'} + ${grow})` : baseH;
     put(SEL.wrap, 'position', on ? 'relative' : '');
     put(SEL.wrap, 'width', on ? w : '');
     put(SEL.wrap, 'flex-shrink', on && w ? '0' : '');
     // Положение по ширине: 0 — у левого края, 100 — вплотную к правому.
     // Считается от ширины сообщения, поэтому на телефоне аватарка не уезжает
-    put(SEL.wrap, 'margin-left', on && !s.full && s.posX && w ? `calc((100% - ${w}) * ${r2(s.posX / 100)})` : '');
+    put(SEL.wrap, 'margin-left', on && s.full ? `calc(-1 * ${pl})`
+        : on && !place && s.posX && w ? `calc((100% - ${w}) * ${r2(s.posX / 100)})` : '');
+    put(SEL.wrap, 'margin-right', on && s.full ? `calc(-1 * ${pr})` : '');
     put(SEL.wrap, 'transform', on && (s.dx || s.dy) ? `translate(${s.dx}px, ${s.dy}px)` : '');
     put(SEL.wrap, 'z-index', on ? '1' : '');
 
@@ -371,17 +473,53 @@ function buildRules(s) {
         : '';
     put(SEL.av, 'width', on && w ? '100%' : '');
     put(SEL.av, 'height', on ? hgt : '');
-    put(SEL.av, 'border-radius', on && shape.radius ? shape.radius : '');
-    put(SEL.av, 'overflow', on ? 'hidden' : '');
-    put(SEL.av, 'outline', on && s.ring && s.ringColor ? `${s.ring}px solid ${s.ringColor}` : '');
-    put(SEL.av, 'outline-offset', on && s.ring ? '0' : '');
-    put(SEL.av, 'mask', mask ? `${mask} center / contain no-repeat` : '');
-    put(SEL.av, '-webkit-mask', mask ? `${mask} center / contain no-repeat` : '');
+    put(SEL.av, 'aspect-ratio', bind ? s.ratio : '');
+    put(SEL.av, '--vte-av-h', grow ? baseH : '');
+    put(SEL.av, '--vte-av-grow', grow);
+    // Форму задаёт маска — скругление не нужно: в Chrome его край иначе
+    // просвечивает сквозь маску тонкой пунктирной линией
+    put(SEL.av, 'border-radius', on && shape.radius ? shape.radius : on && mask ? '0' : '');
+
+    /* Маска и растворение — на картинке, а не на самой аватарке: маска
+       срезает всё за пределами фигуры, в том числе обводку. Обводка по
+       контуру — это тот же силуэт позади картинки, больше на толщину
+       обводки со всех сторон и залитый цветом. Повторяет любую форму,
+       хоть PNG, и не требует фильтров. */
+    const fade = on && s.fade ? `linear-gradient(to bottom, #000 ${100 - s.fade}%, transparent)` : '';
+    const layers = [mask ? `${mask} center / ${grow ? '100% 100%' : 'contain'} no-repeat` : '', fade].filter(Boolean);
+    put(SEL.img, 'mask', layers.join(', '));
+    put(SEL.img, '-webkit-mask', layers.join(', '));
+    put(SEL.img, 'mask-composite', layers.length > 1 ? 'intersect' : '');
+    put(SEL.img, '-webkit-mask-composite', layers.length > 1 ? 'source-in' : '');
+    put(SEL.av, 'mask', '');           // старая запись
+    put(SEL.av, '-webkit-mask', '');
+
+    // Цвет ещё не выбран — обводка цвета текста, толщина не теряется
+    const ringOn = on && s.ring;
+    const rc = s.ringColor || 'currentColor';
+    const contour = ringOn && layers.length;
+    put(SEL.av, 'outline', ringOn && !contour ? `${s.ring}px solid ${rc}` : '');
+    put(SEL.av, 'outline-offset', ringOn && !contour ? '0' : '');
+    put(SEL.av, 'filter', '');         // старая запись
+    // Силуэт-обводку не должен срезать край аватарки
+    put(SEL.av, 'overflow', on ? (contour ? 'visible' : 'hidden') : '');
+    put(SEL.av, 'position', contour ? 'relative' : '');
+    put(SEL.av, 'isolation', contour ? 'isolate' : '');
+    put(SEL.ring, 'content', contour ? '""' : '');
+    put(SEL.ring, 'position', contour ? 'absolute' : '');
+    put(SEL.ring, 'inset', contour ? `-${s.ring}px` : '');
+    put(SEL.ring, 'z-index', contour ? '-1' : '');
+    put(SEL.ring, 'background-color', contour ? rc : '');
+    put(SEL.ring, 'mask', contour ? layers.join(', ') : '');
+    put(SEL.ring, '-webkit-mask', contour ? layers.join(', ') : '');
+    put(SEL.ring, 'mask-composite', contour && layers.length > 1 ? 'intersect' : '');
+    put(SEL.ring, '-webkit-mask-composite', contour && layers.length > 1 ? 'source-in' : '');
+    put(SEL.ring, 'pointer-events', contour ? 'none' : '');
 
     put(SEL.img, 'width', on ? '100%' : '');
     put(SEL.img, 'height', on ? '100%' : '');
     put(SEL.img, 'object-fit', on ? 'cover' : '');
-    put(SEL.img, 'border-radius', on ? 'inherit' : '');
+    put(SEL.img, 'border-radius', on ? (mask && !shape.radius ? '0' : 'inherit') : '');
     put(SEL.img, 'border', on ? 'none' : '');
     put(SEL.img, 'box-shadow', on ? 'none' : '');
 
@@ -428,19 +566,35 @@ function buildRules(s) {
     const ban = on && s.bannerOn && s.bannerImg;
     const bh = fluid(s.bannerHMin, s.bannerHMax);
     put(SEL.mes, 'position', ban ? 'relative' : '');
-    put(SEL.mes, 'overflow', ban && s.bannerClip ? 'hidden' : '');
+    /* Чат в ST — колонка flex. С overflow: hidden браузер разрешает
+       сообщениям сжиматься, и они сплющиваются под высоту экрана —
+       прокрутка пропадает. clip режет так же, но сжимать не даёт */
+    put(SEL.mes, 'overflow', ban && s.bannerClip ? 'clip' : '');
+    put(SEL.mes, 'flex-shrink', ban && s.bannerClip ? '0' : '');
     put(SEL.banner, 'content', ban ? '""' : '');
     put(SEL.banner, 'position', ban ? 'absolute' : '');
-    put(SEL.banner, 'left', ban ? '0' : '');
-    put(SEL.banner, 'right', ban ? '0' : '');
+    /* Родной размер: шапка — ровно картинка, не шире её настоящей ширины.
+       Никогда не растягивается больше себя, поэтому не мылится; на узком
+       экране уменьшается вместе с сообщением и держит пропорцию —
+       без @media. «По ширине» — старый способ: картинка тянется. */
+    const nat = ban && s.bannerFit === 'native' && s.bannerNatW && s.bannerNatH;
+    const nw = nat ? Math.round(s.bannerNatW * (s.bannerScale || 100) / 100) : 0;
+    const bw = nat ? `min(100%, ${nw}px)` : '';
+    put(SEL.banner, 'left', ban ? (nat ? `calc((100% - ${bw}) * ${r2(s.bannerX / 100)})` : '0') : '');
+    put(SEL.banner, 'right', ban && !nat ? '0' : '');
+    put(SEL.banner, 'width', nat ? bw : '');
+    put(SEL.banner, 'aspect-ratio', nat && !bh ? `${s.bannerNatW} / ${s.bannerNatH}` : '');
     put(SEL.banner, 'top', ban ? '0' : '');
-    put(SEL.banner, 'height', ban ? (bh || '160px') : '');
+    put(SEL.banner, 'height', ban ? (bh || (nat ? 'auto' : '160px')) : '');
     put(SEL.banner, 'background-image', ban ? cssUrl(s.bannerImg) : '');
-    put(SEL.banner, 'background-size', ban ? `${s.bannerScale}% auto` : '');
+    put(SEL.banner, 'background-size', ban ? (nat ? (bh ? 'cover' : '100% 100%') : `${s.bannerScale}% auto`) : '');
     put(SEL.banner, 'background-position', ban ? `${s.bannerX}% ${s.bannerY}%` : '');
+    put(SEL.banner, '--vte-banner-nat', nat ? `${s.bannerNatW}x${s.bannerNatH}` : '');
     put(SEL.banner, 'background-repeat', ban ? 'no-repeat' : '');
     put(SEL.banner, 'border-radius', ban && s.bannerRadius ? `${s.bannerRadius}px` : '');
-    put(SEL.banner, 'outline', ban && s.bannerRing && s.bannerRingColor ? `${s.bannerRing}px solid ${s.bannerRingColor}` : '');
+    // Обводка — внутрь шапки: снаружи её срезает край сообщения (оставался только низ)
+    put(SEL.banner, 'outline', ban && s.bannerRing ? `${s.bannerRing}px solid ${s.bannerRingColor || 'currentColor'}` : '');
+    put(SEL.banner, 'outline-offset', ban && s.bannerRing ? `-${s.bannerRing}px` : '');
     put(SEL.banner, 'opacity', ban && s.bannerOpacity !== 100 ? r2(s.bannerOpacity / 100) : '');
     put(SEL.banner, 'filter', ban && s.bannerBlur ? `blur(${s.bannerBlur}px)` : '');
     const fadeMask = ban && s.bannerFade
@@ -579,7 +733,19 @@ function slider(key, min, max, unit, zeroText, hint) {
         },
     });
     show();
-    return h('span.vte-tb-slider', {}, [input, out]);
+    // ↺ — вернуть «как в теме». Видна, только когда значение изменено
+    const def = (defaults()[key] ?? 0);
+    const reset = iconBtn('fa-rotate-left', 'Сбросить эту настройку', () => {
+        state[key] = def;
+        input.value = String(def || 0);
+        show();
+        sync();
+        commit();
+    }, 'vte-tb-mini.vte-tb-reset');
+    const sync = () => reset.classList.toggle('vte-tb-reset-off', ((state[key] || 0)) === def);
+    input.addEventListener('input', sync);
+    sync();
+    return h('span.vte-tb-slider', {}, [input, out, reset]);
 }
 
 /** Пара «телефон / ПК» со связкой */
@@ -632,8 +798,22 @@ function pair(title, aKey, bKey, max, hint) {
         },
     }, [ic, txt]);
 
+    // ↺ — сбросить обе (телефон и ПК)
+    const defA = (defaults()[aKey] ?? 0), defB = (defaults()[bKey] ?? 0);
+    const resetBoth = iconBtn('fa-rotate-left', 'Сбросить телефон и ПК', () => {
+        state[aKey] = defA;
+        state[bKey] = defB;
+        A.show(); B.show();
+        k = ratio();
+        syncBoth();
+        commit();
+    }, 'vte-tb-mini.vte-tb-reset');
+    const syncBoth = () => resetBoth.classList.toggle('vte-tb-reset-off', (state[aKey] || 0) === defA && (state[bKey] || 0) === defB);
+    A.input.addEventListener('input', syncBoth);
+    B.input.addEventListener('input', syncBoth);
+    syncBoth();
     return h('div.vte-tb-sizes', { title: hint || '' }, [
-        h('div.vte-tb-sizes-head', {}, [h('span.vte-tb-label', { text: title }), link]),
+        h('div.vte-tb-sizes-head', {}, [h('span.vte-tb-label', { text: title }), link, resetBoth]),
         A.row, B.row,
     ]);
 }
@@ -674,15 +854,16 @@ function check(key, label, hint, after) {
     return h('label.vte-tb-check', { title: hint || '' }, [input, h('span', { text: label })]);
 }
 
-function select(key, options, after) {
+function select(key, options, after, before) {
     const sel = h('select.vte-tb-select', {
-        on: { change: (e) => { state[key] = e.target.value; state.on = true; commit(); after?.(); } },
+        // before — поправить связанные поля до записи: одна запись, одна отмена
+        on: { change: (e) => { state[key] = e.target.value; state.on = true; before?.(); commit(); after?.(); } },
     }, options.map(([v, t]) => h('option', { value: v, text: t })));
     sel.value = state[key];
     return sel;
 }
 
-function urlRow(key, placeholder, after) {
+function urlRow(key, placeholder, after, before) {
     const input = h('input.vte-input.vte-tb-url', {
         type: 'text', spellcheck: false, placeholder, value: state[key],
         on: {
@@ -694,6 +875,7 @@ function urlRow(key, placeholder, after) {
                 }
                 state[key] = v;
                 state.on = true;
+                before?.(v);   // связанные поля — до записи: одна запись, одна отмена
                 commit();
                 after ? after(v) : render();
             },
@@ -814,23 +996,37 @@ function editScreen() {
                     change: (e) => {
                         state.full = e.target.checked;
                         state.on = true;
-                        const moved = state.full && !state.below;
-                        if (moved) state.below = true;
+                        const moved = state.full && !state.below && !String(state.place).startsWith('top');
+                        if (moved) {
+                            state.below = true;
+                            // Во всю ширину сбоку от пузыря не встать — ставим над ним
+                            if (state.place === 'left' || state.place === 'right') state.place = 'top-left';
+                        }
                         commit();   // одна запись — одна отмена
                         render();
                         if (moved) say('Текст перенесён под аватарку — выключить можно в «Раскладке»');
                     },
                 },
             }), h('span', { text: 'Во всю ширину сообщения' })]),
-            state.full ? null : pair('Ширина', 'wMin', 'wMax', 900, 'Первое значение — на узком экране, второе — на широком'),
-            pair('Высота', 'hMin', 'hMax', 900),
+            state.full ? null : check('bindChat', 'Привязать к ширине чата',
+                'Ширина — доля сообщения, высота — по пропорции. Меняешь ширину чата в таверне — аватарка вместе с ней'),
+            !state.full && state.bindChat ? row('Ширина от сообщения', slider('wPct', 5, 100, '%', '—')) : null,
+            !state.full && state.bindChat ? row('Пропорции', select('ratio', RATIOS, render)) : null,
+            state.full || state.bindChat ? null : pair('Ширина', 'wMin', 'wMax', 900, 'Первое значение — на узком экране, второе — на широком'),
+            state.bindChat && !state.full ? null : pair('Высота', 'hMin', 'hMax', 900),
+            state.bindChat && !state.full ? null : pair('Растянуть вниз', 'growMin', 'growMax', 600,
+                'Добавляет высоты книзу — картинка и маска тянутся вместе'),
+            row('Растворение книзу', slider('fade', 0, 90, '%', 'нет'),
+                'Низ аватарки плавно тает. Лёгкая замена размытию: размытие пересчитывается при каждой прокрутке'),
             h('div.vte-av-shapes', {}, SHAPES.filter(s => s.path || s.radius || s.id === 'none').map(s => h(`button.vte-av-shape${state.shape === s.id ? '.active' : ''}`, {
                 type: 'button', title: s.name,
                 on: { click: () => { state.shape = s.id; state.on = true; commit(); render(); } },
             }, [s.path
                 ? h('span.vte-av-shape-ic', { style: `-webkit-mask:${shapeUrl(s.path)} center/contain no-repeat;mask:${shapeUrl(s.path)} center/contain no-repeat` })
                 : h('span.vte-av-shape-ic.vte-av-shape-plain', { style: s.radius ? `border-radius:${s.radius}` : 'opacity:.35' })]))),
-            row('Своя форма', urlRow('maskUrl', 'ссылка на .png / .svg', (v) => { state.shape = v ? 'custom' : 'none'; commit(); render(); checkMask(v); })),
+            row('Своя форма', urlRow('maskUrl', 'ссылка на .png / .svg',
+                (v) => { render(); checkMask(v); },
+                (v) => { state.shape = v ? 'custom' : 'none'; })),
             h('textarea.vte-input.vte-av-svg', {
                 spellcheck: false, rows: 2, placeholder: 'или код <svg>…</svg>',
                 on: {
@@ -855,11 +1051,20 @@ function editScreen() {
         ]),
 
         group('pos', 'Положение аватарки', [
-            row('По ширине', slider('posX', 0, 100, '%', 'слева'),
+            state.full ? null : row('Выровнять', alignButtons(),
+                'Аватарка встаёт над пузырём слева, по центру или справа — текст сразу уходит под неё'),
+            row('Привязка', select('place', PLACES, render, () => {
+                // Над пузырём — это текст под аватаркой, сбоку — нет
+                if (state.place) state.below = state.place.startsWith('top');
+                if (state.full && (state.place === 'left' || state.place === 'right')) state.full = false;
+            }), 'Аватарка встаёт рядом с пузырём сама, отступ считается автоматически на любом экране'),
+            state.place ? pair('Расстояние до пузыря', 'gapMin', 'gapMax', 80, 'Первое — на телефоне, второе — на ПК') : null,
+            state.place ? check('mirrorUser', 'У моих сообщений — с другой стороны') : null,
+            state.place ? null : row('По ширине', slider('posX', 0, 100, '%', 'слева'),
                 'Считается от ширины сообщения: 0 — у левого края, 100 — вплотную к правому. На телефоне не уезжает'),
             row('Подвинуть вбок', slider('dx', -600, 600, 'px', 'нет'), 'Точная подгонка, можно и за край'),
             row('Подвинуть вверх-вниз', slider('dy', -600, 600, 'px', 'нет')),
-            row('Обводка', slider('ring', 0, 12, 'px', 'нет')),
+            row('Обводка', slider('ring', 0, 12, 'px', 'нет'), 'У фигур и своей картинки обводка идёт по контуру'),
             row('Цвет обводки', colorBtn('ringColor', 'выбрать')),
         ]),
 
@@ -891,9 +1096,19 @@ function editScreen() {
 
         group('banner', 'Шапка позади сообщения', [
             check('bannerOn', 'Включить шапку'),
-            state.bannerOn ? row('Картинка', urlRow('bannerImg', 'широкая картинка')) : null,
-            state.bannerOn ? pair('Высота шапки', 'bannerHMin', 'bannerHMax', 600) : null,
-            state.bannerOn ? row('Масштаб картинки', slider('bannerScale', 50, 400, '%', '100%')) : null,
+            state.bannerOn ? row('Картинка', urlRow('bannerImg', 'широкая картинка', (v) => { render(); measureBanner(v); })) : null,
+            state.bannerOn ? row('Размер', select('bannerFit', [
+                ['native', 'родной — чётко, без растяжения'], ['width', 'растянуть по ширине (может мылиться)'],
+            ], () => { render(); if (state.bannerFit === 'native' && !state.bannerNatW) measureBanner(state.bannerImg); },
+            () => { if (state.bannerFit === 'native') { state.bannerScale = Math.min(100, state.bannerScale || 100); } })) : null,
+            state.bannerOn && state.bannerFit === 'native' && !state.bannerNatW
+                ? h('small.vte-note', { text: 'Узнаю размер картинки…' }) : null,
+            state.bannerOn && state.bannerFit === 'native' && state.bannerNatW
+                ? h('small.vte-note', { text: `Картинка ${state.bannerNatW}×${state.bannerNatH}. Больше этого не растягивается, на узком экране уменьшается с сохранением пропорций.` }) : null,
+            state.bannerOn ? pair('Высота шапки', 'bannerHMin', 'bannerHMax', 600,
+                state.bannerFit === 'native' ? 'Пусто — по пропорции картинки. Задана — картинка заполняет высоту' : '') : null,
+            state.bannerOn ? row(state.bannerFit === 'native' ? 'Размер от родного' : 'Масштаб картинки',
+                slider('bannerScale', state.bannerFit === 'native' ? 20 : 50, state.bannerFit === 'native' ? 100 : 400, '%', '100%')) : null,
             state.bannerOn ? row('Сдвиг вбок', slider('bannerX', 0, 100, '%', '50%')) : null,
             state.bannerOn ? row('Сдвиг вверх-вниз', slider('bannerY', 0, 100, '%', '50%')) : null,
             state.bannerOn ? row('Скругление', slider('bannerRadius', 0, 60, 'px', 'нет')) : null,
@@ -906,7 +1121,20 @@ function editScreen() {
         ]),
 
         group('text', 'Раскладка', [
-            check('below', 'Текст под аватаркой'),
+            h('label.vte-tb-check', {}, [h('input', {
+                type: 'checkbox', checked: !!state.below,
+                on: {
+                    change: (e) => {
+                        state.below = e.target.checked;
+                        state.on = true;
+                        // Привязка должна совпадать: над пузырём ↔ текст под аватаркой
+                        if (state.below && (state.place === 'left' || state.place === 'right')) state.place = 'top-left';
+                        if (!state.below && String(state.place).startsWith('top')) state.place = '';
+                        commit();
+                        render();
+                    },
+                },
+            }), h('span', { text: 'Текст под аватаркой' })]),
             h('small.vte-note', { text: 'Ник, дата, бейджи, цвета текста и сам пузырь — в окне «Пузыри».' }),
         ]),
 
@@ -945,6 +1173,46 @@ async function checkMask(url) {
         note.textContent = 'Этот сайт не разрешает брать картинку для маски (нужен CORS) — аватарка пропадёт. '
             + 'Как фон такая ссылка работает, а как форма — нет. Скачайте картинку и нажмите «Загрузить с компьютера».';
     }
+}
+
+/** Слева / по центру / справа — над пузырём. Текст сразу под аватаркой,
+    одна запись — одна отмена */
+function alignButtons() {
+    const cur = String(state.place || '');
+    const opts = [['top-left', 'Слева', 'fa-align-left'], ['top-center', 'По центру', 'fa-align-center'], ['top-right', 'Справа', 'fa-align-right']];
+    return h('div.vte-seg.vte-av-align', {}, opts.map(([p, t, ic]) =>
+        h(`button.vte-seg-btn${cur === p ? '.active' : ''}`, {
+            type: 'button', title: t,
+            on: {
+                click: () => {
+                    const moved = !state.below;
+                    state.place = p;
+                    state.below = true;
+                    state.full = false;
+                    state.on = true;
+                    commit();
+                    render();
+                    if (moved) say('Текст перенесён под аватарку — выключить можно в «Раскладке»');
+                },
+            },
+        }, [icon(ic), h('span', { text: ` ${t}` })])));
+}
+
+/* Родной размер шапки: грузим картинку как обычную <img> (разрешение
+   сайта не нужно) и берём её настоящие ширину и высоту */
+function measureBanner(url) {
+    if (!url) return;
+    const img = new Image();
+    img.onload = () => {
+        if (state.bannerImg !== url) return;
+        state.bannerNatW = img.naturalWidth;
+        state.bannerNatH = img.naturalHeight;
+        state.on = true;
+        commit();
+        render();
+    };
+    img.onerror = () => { if (state.bannerImg === url) say('Картинка шапки не загрузилась — проверьте ссылку'); };
+    img.src = url;
 }
 
 /* ---------- своя форма с компьютера ----------

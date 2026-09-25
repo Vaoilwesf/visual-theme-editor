@@ -399,3 +399,11 @@ html[data-vte-theme=moon] :is(#vte-inspector-panel,#vte-templates-panel,#vte-top
 #vte-bubbles-panel .vte-bb-glyph-btn{flex:0 0 auto;padding:4px 9px!important;font-size:10.5px!important}
 .vte-fonts-host{display:flex;flex-direction:column;gap:8px;flex-shrink:0}
 .vte-fonts-theme:empty{display:none}
+/* Аватарки: выравнивание */
+.vte-av-align{flex:1 1 auto;min-width:0}
+.vte-av-align .vte-seg-btn{padding:5px 6px!important;font-size:10.5px!important;white-space:nowrap}
+/* ↺ у ползунков: видна, только когда значение изменено */
+.vte-tb-reset{flex:0 0 auto;margin-left:2px}
+.vte-tb-reset.vte-tb-reset-off{visibility:hidden}
+/* Пузыри: «Привязать к ближайшему» */
+#vte-bubbles-panel .vte-bb-magnet{align-self:flex-start;margin:4px 0 6px;flex-shrink:0}

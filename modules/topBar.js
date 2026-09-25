@@ -659,7 +659,19 @@ function slider(key, min, max, unit, zeroText) {
         },
     });
     show();
-    return h('span.vte-tb-slider', {}, [input, out]);
+    // ↺ — вернуть «как в теме». Видна, только когда значение изменено
+    const def = (defaults()[key] ?? 0);
+    const reset = iconBtn('fa-rotate-left', 'Сбросить эту настройку', () => {
+        state[key] = def;
+        input.value = String(def || 0);
+        show();
+        sync();
+        commit();
+    }, 'vte-tb-mini.vte-tb-reset');
+    const sync = () => reset.classList.toggle('vte-tb-reset-off', ((state[key] || 0)) === def);
+    input.addEventListener('input', sync);
+    sync();
+    return h('span.vte-tb-slider', {}, [input, out, reset]);
 }
 
 function colorBtn(key, emptyText) {

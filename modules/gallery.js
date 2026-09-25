@@ -46,8 +46,23 @@ const SEL = {
     personaImg: '#user_avatar_block .avatar img',
     quick: '.hotswap .avatar, .avatars_inline .avatar',
     quickImg: '.hotswap .avatar img, .avatars_inline .avatar img',
-    quickWrap: '.hotswap, .avatars_inline, #rm_print_characters_block',
+    // Полоса быстрых аватарок в правой панели. #HotSwapWrapper — чтобы
+    // перекрыть общее правило для всех .avatars_inline
+    hot: '#HotSwapWrapper .hotswap',
+    hotAv: '#HotSwapWrapper .hotswap .avatar',
+    hotImg: '#HotSwapWrapper .hotswap .avatar img',
+    // display полосы меняем только пока она включена: ST прячет её правилом
+    // body.no-hotswap .hotswap { display: none !important } — перебивать нельзя
+    hotOn: 'body:not(.no-hotswap) #HotSwapWrapper .hotswap',
 };
+
+/* Прокручиваются только списки персонажей и персон. У каждого своя строка:
+   «::-webkit-scrollbar» в списке через запятую относится лишь к последнему
+   селектору — остальные получали display: none целиком (так пропадали
+   быстрые аватарки) */
+const SCROLLERS = ['#rm_print_characters_block', '#user_avatar_block'];
+/* Старая запись с ошибкой — только прочитать и стереть */
+const OLD_WRAP = '.hotswap, .avatars_inline, #rm_print_characters_block';
 
 const VW_MIN = 360;
 const VW_MAX = 1280;
@@ -132,7 +147,21 @@ function defaults() {
         personaOn: false, personaLayout: 'stack', personaMinW: 120, personaGap: 10, personaRadius: 12, personaRing: 0, personaRingColor: '',
         /* быстрые аватарки */
         quickOn: false, quickSize: 0, quickRadius: 0, quickRing: 0, quickRingColor: '', hideScroll: false,
+        // расстояние: телефон → ПК; выравнивание; что делать, если не помещаются
+        quickGapMin: 0, quickGapMax: 0, quickAlign: '', quickFit: '', quickMinSize: 32,
     };
+}
+
+/** Расстояние «телефон → ПК» */
+function fluidGap(a, b) {
+    a = a || 0; b = b || 0;
+    if (!a && !b) return '';
+    if (a === b) return `${a}px`;
+    const lo = Math.min(a, b), hi = Math.max(a, b);
+    const slope = (b - a) / (VW_MAX - VW_MIN);
+    const k = a - slope * VW_MIN;
+    const r = (n) => Math.round(n * 100) / 100;
+    return `clamp(${lo}px, ${r(k)}px + ${r(slope * 100)}vw, ${hi}px)`;
 }
 
 const strip = (v) => String(v || '').replace(/\s*!important\s*$/i, '').trim();
@@ -143,7 +172,7 @@ function readState() {
     const s = defaults();
     const rules = onReadRules?.() || new Map();
     const get = (sel, prop) => strip(rules.get(sel)?.get(prop));
-    if (!rules.get(SEL.grid) && !rules.get(SEL.card) && !rules.get(SEL.persona) && !rules.get(SEL.quick)) return s;
+    if (![SEL.grid, SEL.card, SEL.persona, SEL.quick, SEL.hot, OLD_WRAP, ...SCROLLERS].some(k => rules.get(k)?.size)) return s;
     s.on = true;
 
     s.gridOn = get(SEL.grid, 'display') === 'grid';
@@ -196,7 +225,16 @@ function readState() {
     s.quickRadius = num(get(SEL.quick, 'border-radius'));
     const qr = get(SEL.quick, 'outline').match(/^(\d+(?:\.\d+)?)px\s+solid\s+(.+)$/);
     if (qr) { s.quickRing = +qr[1]; s.quickRingColor = qr[2]; }
-    s.hideScroll = get(SEL.quickWrap, 'scrollbar-width') === 'none';
+    s.hideScroll = SCROLLERS.some(k => get(k, 'scrollbar-width') === 'none') || get(OLD_WRAP, 'scrollbar-width') === 'none';
+    const g = String(get(SEL.hot, 'gap'));
+    const gm = g.match(/^clamp\(\s*(\d+)px.*,\s*(\d+)px\s*\)$/) || g.match(/^((\d+))px$/);
+    if (gm) { s.quickGapMin = +gm[1]; s.quickGapMax = +gm[2]; }
+    const jc = get(SEL.hot, 'justify-content');
+    s.quickAlign = jc === 'flex-start' ? 'start' : jc === 'space-evenly' ? 'even' : '';
+    const hmin = (get(SEL.hotOn, 'grid-template-columns').match(/minmax\((\d+)px/) || [])[1];
+    s.quickFit = hmin ? 'shrink' : '';
+    if (hmin) s.quickMinSize = +hmin;
+    if (s.quickGapMin || s.quickGapMax || s.quickAlign || s.quickFit) s.quickOn = true;
     void pct;
     return s;
 }
@@ -331,8 +369,51 @@ function buildRules(s) {
     put(SEL.quickImg, 'height', q ? '100%' : '');
     put(SEL.quickImg, 'object-fit', q ? 'cover' : '');
     put(SEL.quickImg, 'border-radius', q ? 'inherit' : '');
-    put(SEL.quickWrap, 'scrollbar-width', on && s.hideScroll ? 'none' : '');
-    put(`${SEL.quickWrap}::-webkit-scrollbar`, 'display', on && s.hideScroll ? 'none' : '');
+    // Быстрые аватарки: расстояние ровно заданное (без «растянуть поровну»).
+    // Не помещаются — либо уходят в скрытую вторую строку, как в ST, либо
+    // все сжимаются в одну строку. Налезть друг на друга не могут: это
+    // обычная строка flex с промежутком.
+    const gap = q ? fluidGap(s.quickGapMin, s.quickGapMax) : '';
+    const shrink = q && s.quickFit === 'shrink';
+    const align = { start: 'flex-start', even: 'space-evenly' }[s.quickAlign] || '';
+    put(SEL.hot, 'gap', gap);
+    // Без выбора и с заданным расстоянием — по центру: «поровну» снова
+    // сделало бы промежутки зависимыми от числа персонажей
+    put(SEL.hot, 'justify-content', q && (align || gap) ? (align || 'center') : '');
+    put(SEL.hot, 'flex-wrap', '');   // старая запись
+    // Высота полосы — под размер аватарки, иначе крупные обрезаются снизу
+    put(SEL.hot, 'max-height', q && s.quickSize
+        ? `calc(${s.quickSize}px + 2 * var(--avatar-base-border-radius) + ${s.quickRing * 2}px)` : '');
+    put(SEL.hotAv, 'margin', gap || shrink ? `var(--avatar-base-border-radius) ${s.quickRing}px` : '');
+    // «Сжимаются»: сетка, где колонка — от минимального размера до обычного.
+    // Сколько влезает по минимуму — столько колонок, дальше они растут до
+    // обычного размера. Не влезшие получают строку нулевой высоты и не
+    // выглядывают. Меньше минимума аватарки не бывают
+    const full = s.quickSize ? `${s.quickSize}px` : 'var(--avatar-base-width)';
+    const least = Math.max(16, s.quickMinSize || 32);
+    put(SEL.hotOn, 'display', shrink ? 'grid' : '');
+    // Колонки считаются по минимуму (max-content браузер при подсчёте не
+    // берёт), потом растут до размера аватарки — а она не больше обычной
+    put(SEL.hotOn, 'grid-template-columns', shrink ? `repeat(auto-fit, minmax(${least}px, max-content))` : '');
+    put(SEL.hotOn, 'grid-template-rows', shrink ? 'auto' : '');
+    put(SEL.hotOn, 'grid-auto-rows', shrink ? '0' : '');
+    put(SEL.hotOn, 'row-gap', shrink ? '0' : '');
+    put(SEL.hotAv, 'flex', '');        // старая запись
+    put(SEL.hotAv, 'min-width', shrink ? '0' : '');
+    put(SEL.hotAv, 'max-width', shrink ? full : '');
+    put(SEL.hotAv, 'width', shrink ? '100%' : '');
+    put(SEL.hotAv, 'height', shrink ? 'auto' : '');
+    put(SEL.hotAv, 'aspect-ratio', shrink ? '1' : '');
+    put(SEL.hotImg, 'width', shrink ? '100%' : '');
+    put(SEL.hotImg, 'height', shrink ? '100%' : '');
+
+    // Полосы прокрутки: у каждого списка своя строка
+    for (const k of SCROLLERS) {
+        put(k, 'scrollbar-width', on && s.hideScroll ? 'none' : '');
+        put(`${k}::-webkit-scrollbar`, 'display', on && s.hideScroll ? 'none' : '');
+    }
+    put(OLD_WRAP, 'scrollbar-width', '');
+    put(`${OLD_WRAP}::-webkit-scrollbar`, 'display', '');
     return rules;
 }
 
@@ -457,6 +538,8 @@ function render() {
             state.gridOn ? row('Скругление', slider('radius', 0, 40, 'px', 'нет')) : null,
             state.gridOn ? row('Видимая часть фото', slider('focusY', 0, 100, '%', 'сверху'),
                 'Обычно лучше 10–25%: тогда видно лицо, а не середину картинки') : null,
+            check('hideScroll', 'Спрятать полосу прокрутки у списков персонажей и персон',
+                'Листать можно как раньше — колёсиком или пальцем, просто без полосы сбоку'),
         ]),
 
         group('border', 'Обводка карточки', [
@@ -499,13 +582,22 @@ function render() {
             state.personaOn ? row('Цвет обводки', colorBtn('personaRingColor', 'выбрать')) : null,
         ]),
 
-        group('quick', 'Быстрые аватарки и прокрутка', [
-            check('quickOn', 'Настроить быстрые аватарки (hotswap)'),
+        group('quick', 'Hot-swap (избранные персонажи)', [
+            check('quickOn', 'Настроить Hot-swap'),
             state.quickOn ? row('Размер', slider('quickSize', 0, 140, 'px', 'как в теме')) : null,
             state.quickOn ? row('Скругление', slider('quickRadius', 0, 50, 'px', 'как в теме')) : null,
             state.quickOn ? row('Обводка', slider('quickRing', 0, 6, 'px', 'нет')) : null,
             state.quickOn ? row('Цвет обводки', colorBtn('quickRingColor', 'выбрать')) : null,
-            check('hideScroll', 'Спрятать полосы прокрутки в списках'),
+            state.quickOn ? pair('Расстояние между аватарками', 'quickGapMin', 'quickGapMax', 60,
+                'Первое — на телефоне, второе — на ПК, между ними плавно. Если задано — не меняется от числа персонажей') : null,
+            state.quickOn ? row('Выравнивание', select('quickAlign', [['', 'по центру'], ['start', 'по левому краю'], ['even', 'растянуть поровну (как в ST)']])) : null,
+            state.quickOn ? row('Если не помещаются', select('quickFit', [['', 'лишние прячутся (как в ST)'], ['shrink', 'сжимаются, потом прячутся']], render)) : null,
+            state.quickOn && state.quickFit === 'shrink' ? row('Не меньше чем', slider('quickMinSize', 16, 80, 'px', '32px'),
+                'Меньше этого аватарки не станут — лишние спрячутся') : null,
+            state.quickOn ? h('small.vte-note', {
+                text: 'Аватарки никогда не налезают друг на друга: лишние либо прячутся, либо все становятся чуть меньше. '
+                    + 'Скрыть полосу целиком можно в настройках самой SillyTavern.',
+            }) : null,
         ]),
 
         h('div.vte-tb-foot', {}, [
@@ -570,7 +662,19 @@ function slider(key, min, max, unit, zeroText, hint) {
         },
     });
     show();
-    return h('span.vte-tb-slider', {}, [input, out]);
+    // ↺ — вернуть «как в теме». Видна, только когда значение изменено
+    const def = (defaults()[key] ?? 0);
+    const reset = iconBtn('fa-rotate-left', 'Сбросить эту настройку', () => {
+        state[key] = def;
+        input.value = String(def || 0);
+        show();
+        sync();
+        commit();
+    }, 'vte-tb-mini.vte-tb-reset');
+    const sync = () => reset.classList.toggle('vte-tb-reset-off', ((state[key] || 0)) === def);
+    input.addEventListener('input', sync);
+    sync();
+    return h('span.vte-tb-slider', {}, [input, out, reset]);
 }
 
 /** Пара «телефон / ПК» со связкой */
@@ -623,8 +727,22 @@ function pair(title, aKey, bKey, max, hint) {
         },
     }, [ic, txt]);
 
+    // ↺ — сбросить обе (телефон и ПК)
+    const defA = (defaults()[aKey] ?? 0), defB = (defaults()[bKey] ?? 0);
+    const resetBoth = iconBtn('fa-rotate-left', 'Сбросить телефон и ПК', () => {
+        state[aKey] = defA;
+        state[bKey] = defB;
+        A.show(); B.show();
+        k = ratio();
+        syncBoth();
+        commit();
+    }, 'vte-tb-mini.vte-tb-reset');
+    const syncBoth = () => resetBoth.classList.toggle('vte-tb-reset-off', (state[aKey] || 0) === defA && (state[bKey] || 0) === defB);
+    A.input.addEventListener('input', syncBoth);
+    B.input.addEventListener('input', syncBoth);
+    syncBoth();
     return h('div.vte-tb-sizes', { title: hint || '' }, [
-        h('div.vte-tb-sizes-head', {}, [h('span.vte-tb-label', { text: title }), link]),
+        h('div.vte-tb-sizes-head', {}, [h('span.vte-tb-label', { text: title }), link, resetBoth]),
         A.row, B.row,
     ]);
 }

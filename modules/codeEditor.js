@@ -247,6 +247,9 @@ function loadUi() {
     const fs = Number(ui.fontSize);
     ui.fontSize = Number.isFinite(fs) ? Math.max(FS_MIN, Math.min(FS_MAX, fs)) : FS_DEFAULT;
     if (typeof ui.wrap !== 'boolean') ui.wrap = true;
+    // Перенос строк теперь включён по умолчанию: один раз включаем его и тем,
+    // у кого сохранилось «выключено». Дальше окно снова помнит выбор
+    if (!ui.wrapDefaultOn) { ui.wrap = true; ui.wrapDefaultOn = 1; }
     if (!CODE_THEMES.some(t => t.id === ui.theme)) ui.theme = 'default';
     delete ui.forceHighlight;   // от старой версии: облегчённого режима больше нет
 }
