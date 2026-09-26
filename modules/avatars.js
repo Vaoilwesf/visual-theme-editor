@@ -40,7 +40,8 @@ const SEL = {
     img: '.mes .avatar img',
     ring: '.mes .avatar::before',             // обводка по контуру фигуры
     back: '.mes .mesAvatarWrapper::after',    // подложка
-    over: '.mes .mesAvatarWrapper::before',   // слой поверх
+    over: '.mes .mesAvatarWrapper::before',   // слой поверх — старая запись (только прочитать и стереть)
+    overA: '.mes .avatar::after',             // слой поверх — часть самой аватарки
     banner: '.mes::before',                   // шапка позади сообщения
     block: '.mes .mes_block',
     chname: '.mes .ch_name',
@@ -208,6 +209,7 @@ function defaults() {
 
         /* ---- слой поверх ---- */
         overOn: false, overImg: '',
+        // Всё в % от самой аватарки: слой растёт и едет вместе с ней
         overW: 0, overH: 0, overX: 0, overY: 0, overRotate: 0, overOpacity: 100,
 
         /* ---- шапка ---- */
@@ -247,6 +249,21 @@ function readFluid(v) {
     if (m) return { min: Math.round(+m[1]), max: Math.round(+m[2]) };
     const p = String(v || '').match(/^(-?\d+(?:\.\d+)?)px$/);
     return p ? { min: Math.round(+p[1]), max: Math.round(+p[1]) } : { min: 0, max: 0 };
+}
+
+/** Размер живой аватарки и сдвиг её центра от центра обёртки (для пересчёта) */
+function avatarGeometry() {
+    try {
+        const w = document.querySelector('#chat .mes:not(.smallSysMes) .mesAvatarWrapper');
+        const a = w?.querySelector('.avatar');
+        if (!w || !a) return { w: 100, h: 100, dx: 0, dy: 0 };
+        const wr = w.getBoundingClientRect(), ar = a.getBoundingClientRect();
+        return {
+            w: ar.width || 100, h: ar.height || 100,
+            dx: (wr.left + wr.width / 2) - (ar.left + ar.width / 2),
+            dy: (wr.top + wr.height / 2) - (ar.top + ar.height / 2),
+        };
+    } catch { return { w: 100, h: 100, dx: 0, dy: 0 }; }
 }
 
 /** Внутренний отступ сообщения в теме (слева, справа) — у живого сообщения */
@@ -335,15 +352,35 @@ function readState() {
     if (br) { s.backRing = +br[1]; s.backRingColor = br[2]; }
 
     /* слой поверх */
-    s.overImg = urlOf(get(SEL.over, 'background-image'));
+    const newOver = urlOf(get(SEL.overA, 'background-image'));
+    if (newOver) {
+        s.overImg = newOver;
+        s.overW = num(get(SEL.overA, 'width'));
+        s.overH = num(get(SEL.overA, 'height'));
+        const pc = (v) => { const m = String(v).match(/calc\(50% \+ (-?\d+(?:\.\d+)?)%\)/); return m ? Math.round(+m[1]) : 0; };
+        s.overX = pc(get(SEL.overA, 'left'));
+        s.overY = pc(get(SEL.overA, 'top'));
+        s.overRotate = num((get(SEL.overA, 'transform').match(/rotate\((-?\d+(?:\.\d+)?)deg\)/) || [])[1]);
+        s.overOpacity = pct(get(SEL.overA, 'opacity')) || 100;
+    } else {
+        // Старая версия: пиксели от центра всей обёртки (с бейджами).
+        // Пересчитываем в % от аватарки так, чтобы слой остался на месте
+        s.overImg = urlOf(get(SEL.over, 'background-image'));
+        if (s.overImg) {
+            const ot = get(SEL.over, 'transform');
+            const om = ot.match(/translate\(\s*(-?\d+(?:\.\d+)?)px\s*,\s*(-?\d+(?:\.\d+)?)px\s*\)/);
+            const g = avatarGeometry();
+            const wpx = num(get(SEL.over, 'width')) || 140, hpx = num(get(SEL.over, 'height')) || 140;
+            const cx = (om ? +om[1] : 0) + g.dx, cy = (om ? +om[2] : 0) + g.dy;
+            s.overW = Math.round(wpx / g.w * 100);
+            s.overH = Math.round(hpx / g.h * 100);
+            s.overX = Math.round(cx / g.w * 100);
+            s.overY = Math.round(cy / g.h * 100);
+            s.overRotate = num((ot.match(/rotate\((-?\d+(?:\.\d+)?)deg\)/) || [])[1]);
+            s.overOpacity = pct(get(SEL.over, 'opacity')) || 100;
+        }
+    }
     s.overOn = !!s.overImg;
-    s.overW = num(get(SEL.over, 'width'));
-    s.overH = num(get(SEL.over, 'height'));
-    const ot = get(SEL.over, 'transform');
-    const om = ot.match(/translate\(\s*(-?\d+(?:\.\d+)?)px\s*,\s*(-?\d+(?:\.\d+)?)px\s*\)/);
-    if (om) { s.overX = +om[1]; s.overY = +om[2]; }
-    s.overRotate = num((ot.match(/rotate\((-?\d+(?:\.\d+)?)deg\)/) || [])[1]);
-    s.overOpacity = pct(get(SEL.over, 'opacity')) || 100;
 
     /* шапка */
     s.bannerImg = urlOf(get(SEL.banner, 'background-image'));
@@ -502,8 +539,11 @@ function buildRules(s) {
     put(SEL.av, 'outline-offset', ringOn && !contour ? '0' : '');
     put(SEL.av, 'filter', '');         // старая запись
     // Силуэт-обводку не должен срезать край аватарки
-    put(SEL.av, 'overflow', on ? (contour ? 'visible' : 'hidden') : '');
-    put(SEL.av, 'position', contour ? 'relative' : '');
+    // Слой поверх и обводка по контуру выходят за край — не режем. Картинку
+    // внутри по-прежнему скругляет её собственный border-radius
+    const overOn = on && s.overOn && s.overImg;
+    put(SEL.av, 'overflow', on ? (contour || overOn ? 'visible' : 'hidden') : '');
+    put(SEL.av, 'position', contour || overOn ? 'relative' : '');
     put(SEL.av, 'isolation', contour ? 'isolate' : '');
     put(SEL.ring, 'content', contour ? '""' : '');
     put(SEL.ring, 'position', contour ? 'absolute' : '');
@@ -543,24 +583,27 @@ function buildRules(s) {
     put(SEL.back, 'z-index', back ? (s.backFront ? '2' : '-1') : '');
     put(SEL.back, 'pointer-events', back ? 'none' : '');
 
-    /* ---------- слой поверх ---------- */
+    /* ---------- слой поверх ----------
+       Часть самой аватарки (::after), а не всей обёртки с бейджами: центр —
+       центр аватарки, размер и сдвиг — в % от неё. Меняется аватарка
+       (ширина чата, экран, «во всю ширину») — слой растёт и едет вместе. */
     const over = on && s.overOn && s.overImg;
-    put(SEL.over, 'content', over ? '""' : '');
-    put(SEL.over, 'position', over ? 'absolute' : '');
-    put(SEL.over, 'left', over ? '50%' : '');
-    put(SEL.over, 'top', over ? '50%' : '');
-    put(SEL.over, 'width', over ? `${s.overW || 140}px` : '');
-    put(SEL.over, 'height', over ? `${s.overH || 140}px` : '');
-    put(SEL.over, 'background-image', over ? cssUrl(s.overImg) : '');
-    put(SEL.over, 'background-size', over ? 'contain' : '');
-    put(SEL.over, 'background-position', over ? 'center' : '');
-    put(SEL.over, 'background-repeat', over ? 'no-repeat' : '');
-    put(SEL.over, 'transform', over
-        ? `translate(-50%, -50%) translate(${s.overX}px, ${s.overY}px)${s.overRotate ? ` rotate(${s.overRotate}deg)` : ''}`
-        : '');
-    put(SEL.over, 'opacity', over && s.overOpacity !== 100 ? r2(s.overOpacity / 100) : '');
-    put(SEL.over, 'z-index', over ? '3' : '');
-    put(SEL.over, 'pointer-events', over ? 'none' : '');
+    for (const p of ['content', 'position', 'left', 'top', 'width', 'height', 'background-image', 'background-size',
+        'background-position', 'background-repeat', 'transform', 'opacity', 'z-index', 'pointer-events']) put(SEL.over, p, '');
+    put(SEL.overA, 'content', over ? '""' : '');
+    put(SEL.overA, 'position', over ? 'absolute' : '');
+    put(SEL.overA, 'left', over ? (s.overX ? `calc(50% + ${s.overX}%)` : '50%') : '');
+    put(SEL.overA, 'top', over ? (s.overY ? `calc(50% + ${s.overY}%)` : '50%') : '');
+    put(SEL.overA, 'width', over ? `${s.overW || 100}%` : '');
+    put(SEL.overA, 'height', over ? `${s.overH || 100}%` : '');
+    put(SEL.overA, 'background-image', over ? cssUrl(s.overImg) : '');
+    put(SEL.overA, 'background-size', over ? 'contain' : '');
+    put(SEL.overA, 'background-position', over ? 'center' : '');
+    put(SEL.overA, 'background-repeat', over ? 'no-repeat' : '');
+    put(SEL.overA, 'transform', over ? `translate(-50%, -50%)${s.overRotate ? ` rotate(${s.overRotate}deg)` : ''}` : '');
+    put(SEL.overA, 'opacity', over && s.overOpacity !== 100 ? r2(s.overOpacity / 100) : '');
+    put(SEL.overA, 'z-index', over ? '3' : '');
+    put(SEL.overA, 'pointer-events', over ? 'none' : '');
 
     /* ---------- шапка ---------- */
     const ban = on && s.bannerOn && s.bannerImg;
@@ -691,13 +734,9 @@ export function togglePanel() {
 
 function build() {
     els.title = h('span', { text: 'Аватарки' });
-    els.back = h('button.vte-av-back', {
-        type: 'button', title: 'Назад к списку', style: 'display:none',
-        on: { click: () => { state.screen = 'home'; render(); } },
-    }, [icon('fa-chevron-left')]);
 
     const header = h('div.vte-header', {}, [
-        h('div.vte-title', {}, [els.back, h('span.vte-title-ic', {}, [icon('fa-user-astronaut')]), els.title]),
+        h('div.vte-title', {}, [h('span.vte-title-ic', {}, [icon('fa-user-astronaut')]), els.title]),
         h('div.vte-header-btns', {}, [
             iconBtn('fa-window-minimize', 'Свернуть', () => panel.classList.toggle('vte-collapsed')),
             iconBtn('fa-xmark', 'Закрыть', hidePanel, 'vte-icon-btn-close'),
@@ -914,7 +953,7 @@ const TEMPLATES = [
 ];
 
 /* Какие разделы раскрыты (переживает перерисовку) */
-const open = { shape: true, pos: true, back: false, over: false, banner: false, names: false, badges: false, text: true };
+const open = { presets: false, shape: true, pos: true, back: false, over: false, banner: false, names: false, badges: false, text: true };
 
 function group(id, title, children) {
     const list = children.filter(Boolean);
@@ -929,63 +968,39 @@ function group(id, title, children) {
 function render() {
     const b = els.body;
     b.textContent = '';
-    const home = (state.screen || 'home') === 'home';
-    els.title.textContent = home ? 'Аватарки' : 'Аватарки · настройки';
-    els.back.style.display = home ? 'none' : '';
-    b.append(...(home ? homeScreen() : editScreen()).filter(Boolean));
-}
-
-function homeScreen() {
-    // Клик по шаблону НЕ перезаписывает настройки — он только открывает их.
-    // Применить готовые значения шаблона — отдельной кнопкой на плитке.
-    // Раньше повторный клик возвращал значения шаблона поверх сброса.
-    const tiles = h('div.vte-av-tiles', {}, TEMPLATES.map(t => h('div.vte-av-tile', { title: t.hint }, [
-        h('span.vte-av-tile-ic', {}, [icon(t.icon)]),
-        h('span.vte-av-tile-name', { text: t.name }),
-        h('span.vte-av-tile-hint', { text: t.hint }),
-        h('span.vte-av-tile-btns', {}, [
-            h('button.vte-btn.vte-btn-primary.vte-av-tile-apply', {
-                type: 'button', title: 'Поставить готовые значения этого шаблона',
-                on: { click: () => applyTemplate(t) },
-            }, [h('span', { text: 'Применить шаблон' })]),
-            h('button.vte-btn.vte-av-tile-open', {
-                type: 'button', title: 'Открыть настройки как есть, ничего не меняя',
-                on: { click: () => { state.screen = 'edit'; render(); } },
-            }, [h('span', { text: 'Настройки' })]),
-        ]),
-    ])));
-    return [
-        themeSection(),
-        h('small.vte-note', { text: 'Шаблон — это готовые значения. После него всё можно править на одной странице.' }),
-        tiles,
-        h('div.vte-tb-foot', {}, [
-            h('button.vte-btn.vte-btn-primary', {
-                type: 'button',
-                on: { click: () => { state.screen = 'edit'; render(); } },
-            }, [icon('fa-sliders'), h('span', { text: ' Открыть настройки' })]),
-        ]),
-        h('div.vte-tb-foot', {}, [
-            h('button.vte-btn', { type: 'button', on: { click: resetAll } },
-                [icon('fa-rotate-left'), h('span', { text: ' Вернуть сообщения темы' })]),
-            h('button.vte-btn', {
-                type: 'button',
-                title: 'Вернуть тему к виду, какой был при открытии этого окна — включая строки, заменённые прямо в теме',
-                on: { click: () => { onRestore?.() ? say('Вернула как было при открытии окна') : say('Возвращать нечего'); render(); } },
-            }, [icon('fa-clock-rotate-left'), h('span', { text: ' Как было до открытия' })]),
-        ]),
-    ];
+    // Один экран: форма, ширина, шапка и всё остальное — в общих настройках.
+    // Бывшие шаблоны — раздел «Готовые заготовки» вверху
+    b.append(...editScreen().filter(Boolean));
 }
 
 function applyTemplate(t) {
     Object.assign(state, { ...defaults(), ...t.set, on: true, screen: 'edit' });
+    // Раскрываем разделы, которые заготовка поменяла, — чтобы сразу видеть
+    open.shape = true;
+    open.pos = true;
+    if (t.set.bannerOn) open.banner = true;
     commit();
     render();
-    say(`Шаблон «${t.name}» применён — дальше правьте под себя`);
+    say(`Заготовка «${t.name}» применена — дальше правьте под себя. Передумали — кнопка отмены`);
+}
+
+/** Бывшие плитки стартового экрана: те же значения, одной кнопкой */
+function presetsUi() {
+    return [
+        h('small.vte-note', { text: 'Заготовка ставит готовые значения вместо текущих настроек аватарки. Дальше всё правится ниже.' }),
+        ...TEMPLATES.map(t => h('div.vte-av-preset', { title: t.hint }, [
+            h('span.vte-av-preset-ic', {}, [icon(t.icon)]),
+            h('span.vte-av-preset-txt', {}, [h('b', { text: t.name }), h('span', { text: t.hint })]),
+            h('button.vte-btn.vte-av-preset-btn', { type: 'button', on: { click: () => applyTemplate(t) } }, [h('span', { text: 'Применить' })]),
+        ])),
+    ];
 }
 
 function editScreen() {
     return [
         themeSection(),
+
+        group('presets', 'Готовые заготовки', presetsUi()),
 
         group('shape', 'Форма и размер', [
             // Во всю ширину текст сбоку не помещается — сразу ставим его под
@@ -1086,10 +1101,11 @@ function editScreen() {
         group('over', 'Слой поверх', [
             check('overOn', 'Включить слой поверх'),
             state.overOn ? row('Картинка', urlRow('overImg', 'рамка, уголок, блик')) : null,
-            state.overOn ? row('Ширина', slider('overW', 0, 900, 'px', '140px')) : null,
-            state.overOn ? row('Высота', slider('overH', 0, 900, 'px', '140px')) : null,
-            state.overOn ? row('Сдвиг вбок', slider('overX', -600, 600, 'px', 'по центру')) : null,
-            state.overOn ? row('Сдвиг вверх-вниз', slider('overY', -600, 600, 'px', 'по центру')) : null,
+            state.overOn ? h('small.vte-note', { text: 'Всё в % от аватарки: слой держится за неё и растёт вместе с ней на любом экране.' }) : null,
+            state.overOn ? row('Ширина', slider('overW', 10, 400, '%', '100%'), 'От ширины аватарки') : null,
+            state.overOn ? row('Высота', slider('overH', 10, 400, '%', '100%'), 'От высоты аватарки') : null,
+            state.overOn ? row('Сдвиг вбок', slider('overX', -150, 150, '%', 'по центру'), 'В % от ширины аватарки') : null,
+            state.overOn ? row('Сдвиг вверх-вниз', slider('overY', -150, 150, '%', 'по центру'), 'В % от высоты аватарки') : null,
             state.overOn ? row('Поворот', slider('overRotate', -180, 180, '°', 'нет')) : null,
             state.overOn ? row('Непрозрачность', slider('overOpacity', 5, 100, '%', '100%')) : null,
         ]),
@@ -1139,14 +1155,15 @@ function editScreen() {
         ]),
 
         h('div.vte-tb-foot', {}, [
-            h('button.vte-btn', { type: 'button', on: { click: resetAll } },
-                [icon('fa-rotate-left'), h('span', { text: ' Вернуть сообщения темы' })]),
+            h('button.vte-btn', { type: 'button', title: 'Убрать всё, что это окно записало в тему. Останется оформление самой темы — не SillyTavern по умолчанию', on: { click: resetAll } },
+                [icon('fa-rotate-left'), h('span', { text: ' Сбросить все настройки окна' })]),
             h('button.vte-btn', {
                 type: 'button',
-                title: 'Вернуть тему к виду, какой был при открытии этого окна — включая строки, заменённые прямо в теме',
+                title: 'Отменить всё, что сделано с момента открытия этого окна, — включая строки, заменённые прямо в теме',
                 on: { click: () => { onRestore?.() ? say('Вернула как было при открытии окна') : say('Возвращать нечего'); render(); } },
             }, [icon('fa-clock-rotate-left'), h('span', { text: ' Как было до открытия' })]),
         ]),
+        h('small.vte-note.vte-foot-note', { text: '«Как было до открытия» — отменить всё, что сделано с момента открытия окна. «Сбросить все настройки окна» — убрать всё, что это окно когда-либо записало в тему: останется оформление самой темы.' }),
     ];
 }
 
@@ -1179,7 +1196,7 @@ async function checkMask(url) {
     одна запись — одна отмена */
 function alignButtons() {
     const cur = String(state.place || '');
-    const opts = [['top-left', 'Слева', 'fa-align-left'], ['top-center', 'По центру', 'fa-align-center'], ['top-right', 'Справа', 'fa-align-right']];
+    const opts = [['top-left', 'Слева', 'fa-align-left'], ['top-center', 'Центр', 'fa-align-center'], ['top-right', 'Справа', 'fa-align-right']];
     return h('div.vte-seg.vte-av-align', {}, opts.map(([p, t, ic]) =>
         h(`button.vte-seg-btn${cur === p ? '.active' : ''}`, {
             type: 'button', title: t,

@@ -42,6 +42,7 @@ const DEFAULTS = {
     hotkeyToggle: 'Alt+Shift+KeyE', // включить / выключить редактор
     hotkeyPick: 'Alt+Shift+KeyS',   // включить / выключить выбор элемента
     liteEffects: true,              // не предлагать в панели размытие и градиенты
+    floatBtn: false,                // плавающая кнопка: включить редактор и открыть код
     dock: 'off',                    // окно редактора у панели кода: off | left | right | top
     dockWidth: 0,                   // ширина присоединённого окна
     themeOverwrite: 'ask',          // правка поверх правила темы: ask | replace | layer
@@ -63,11 +64,11 @@ function persist() {
 /* ============================================================
    ЗАГРУЗКА МОДУЛЕЙ
 ============================================================ */
-let selector, inspector, generator, fonts, editor, picker, rules, templates, perf, topbar, headers, avatars, gallery, bubbles;
+let selector, inspector, generator, fonts, editor, picker, rules, templates, perf, topbar, headers, avatars, gallery, bubbles, bottombar;
 
 async function loadModules() {
     const load = (name) => import(`${BASE}/modules/${name}.js`);
-    [selector, inspector, generator, fonts, editor, picker, rules, templates, perf, topbar, headers, avatars, gallery, bubbles] = await Promise.all([
+    [selector, inspector, generator, fonts, editor, picker, rules, templates, perf, topbar, headers, avatars, gallery, bubbles, bottombar] = await Promise.all([
         load('selector'),
         load('inspector'),
         load('cssGenerator'),
@@ -82,6 +83,7 @@ async function loadModules() {
         load('avatars'),
         load('gallery'),
         load('bubbles'),
+        load('bottomBar'),
     ]);
 }
 
@@ -131,7 +133,7 @@ function restoreFor(id) {
 
 /** Окна инструментов читают CSS при открытии — после правок обновляем их */
 function refreshTools() {
-    for (const tool of [topbar, headers, avatars, gallery, bubbles]) {
+    for (const tool of [topbar, headers, avatars, gallery, bubbles, bottombar]) {
         try { if (tool?.isOpen?.()) tool.refresh?.(); } catch {}
     }
     try { if (fontsPanel && fontsPanel.style.display !== 'none') renderFontsTheme(); } catch {}
@@ -342,6 +344,7 @@ function deactivate() {
     headers?.hidePanel?.();
     avatars?.hidePanel?.();
     bubbles?.hidePanel?.();
+    bottombar?.hidePanel?.();
     gallery?.hidePanel?.();
     // cleanup вместо stopPreview: снимает ещё и наблюдатель видимости
     // вместе с тегами <link>, подгруженными ради предпросмотра списка
@@ -1250,7 +1253,8 @@ async function applyToolRules(list) {
                 useVariables: false,
                 editInPlace: false,
                 important: true,
-                media: '',
+                // Окно может передать условие (@media / @supports) — правило ляжет внутрь него
+                media: r.media || '',
                 // «выключатель» старого значка темы (картинка, маска…):
                 // при замене в теме его строку просто удаляем
                 neutral: (r.neutral || []).includes(property),
@@ -1916,7 +1920,69 @@ function mountWandItem() {
     updatePickUI();
 }
 
+/* ============================================================
+   ПЛАВАЮЩАЯ КНОПКА
+   Круглая кнопка поверх таверны. Нажатие — включить редактор и открыть
+   панель кода; повторное — выключить редактор (панели закрываются).
+   Перетаскивается; место запоминается. Короткое движение пальцем —
+   это нажатие, а не перетаскивание.
+============================================================ */
+const FLOAT_KEY = 'vte-float-pos';
+
+function updateFloatBtn() {
+    let b = document.getElementById('vte-float-btn');
+    if (!cfg().floatBtn) { b?.remove(); return; }
+    if (!b) {
+        b = h('div#vte-float-btn', { title: 'Редактор темы: включить и открыть код / выключить', role: 'button', tabindex: '0' },
+            [icon('fa-wand-magic-sparkles')]);
+        try {
+            const p = JSON.parse(localStorage.getItem(FLOAT_KEY) || 'null');
+            if (p) { b.style.left = `${p.x}px`; b.style.top = `${p.y}px`; b.style.right = 'auto'; b.style.bottom = 'auto'; }
+        } catch {}
+        let sx = 0, sy = 0, ox = 0, oy = 0, down = false, moved = false;
+        b.addEventListener('pointerdown', (e) => {
+            down = true; moved = false;
+            const r = b.getBoundingClientRect();
+            sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+            b.setPointerCapture(e.pointerId);
+        });
+        b.addEventListener('pointermove', (e) => {
+            if (!down) return;
+            const dx = e.clientX - sx, dy = e.clientY - sy;
+            if (!moved && Math.hypot(dx, dy) < 6) return;
+            moved = true;
+            const r = b.getBoundingClientRect();
+            b.style.right = 'auto'; b.style.bottom = 'auto';
+            b.style.left = `${Math.max(0, Math.min(window.innerWidth - r.width, ox + dx))}px`;
+            b.style.top = `${Math.max(0, Math.min(window.innerHeight - r.height, oy + dy))}px`;
+        });
+        const up = () => {
+            if (!down) return;
+            down = false;
+            if (moved) {
+                const r = b.getBoundingClientRect();
+                try { localStorage.setItem(FLOAT_KEY, JSON.stringify({ x: Math.round(r.left), y: Math.round(r.top) })); } catch {}
+                return;
+            }
+            floatClick();
+        };
+        b.addEventListener('pointerup', up);
+        b.addEventListener('pointercancel', () => { down = false; });
+        b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); floatClick(); } });
+        document.body.appendChild(b);
+    }
+    b.classList.toggle('active', active);
+}
+
+function floatClick() {
+    if (active) { deactivate(); return; }
+    activate();
+    if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS, { silent: true }); applyDock(); }
+    inspector.refreshTools?.();
+}
+
 function updateToggleUI() {
+    try { updateFloatBtn(); } catch {}
     const label = document.getElementById('vte-wand-label');
     if (label) {
         label.textContent = active
@@ -2062,6 +2128,9 @@ function mountSettingsPanel() {
             if (!active) return;
             v ? editor.showPanel() : editor.hidePanel();
         }),
+        check('floatBtn', 'Включить плавающую кнопку',
+            'Одно нажатие — включить редактор и открыть панель кода, повторное — выключить. Кнопку можно перетащить',
+            () => updateFloatBtn()),
         check('pickerOnStart', 'Сразу включать выбор элемента', null),
         check('pickOnce', 'Выключать выбор после клика', null),
         check('hotkey', 'Горячие клавиши', null),
@@ -2503,7 +2572,7 @@ function buildDockPop(box) {
         }, [h('span', { text: label })]));
     }
     box.append(h('div.vte-tools-note', {
-        text: 'Присоединённое окно ездит вместе с панелью кода и тянется по её высоте. '
+        text: 'Присоединённое окно ездит вместе с панелью кода: сбоку — от её верха, сверху — прямо над ней, по высоте содержимого, но не выше кода. '
             + 'На телефоне окна и так снизу — там присоединение не нужно.',
     }));
 }
@@ -2543,18 +2612,21 @@ function applyDock() {
         else if (where === 'left' && r.left - GAP - W < 0) where = 'right';
         else if (where === 'top' && r.top < 220) where = 'right';
 
+        /* Высота — по содержимому, не больше окна кода: окно не тянется
+           пустым до низа. Сверху — прижато низом к окну кода и растёт вверх;
+           сбоку — выровнено по верху окна кода и растёт вниз */
+        s.height = 'auto';
         if (where === 'top') {
             const h = Math.min(r.top - GAP - 8, window.innerHeight * 0.55);
             s.left = `${r.left}px`;
             s.width = `${r.width}px`;
-            s.top = `${r.top - GAP - h}px`;
-            s.height = `${h}px`;
+            s.top = 'auto';
+            s.bottom = `${window.innerHeight - (r.top - GAP)}px`;
             s.maxHeight = `${h}px`;
         } else {
             s.width = `${W}px`;
             s.left = `${where === 'right' ? r.right + GAP : Math.max(0, r.left - GAP - W)}px`;
             s.top = `${r.top}px`;
-            s.height = `${r.height}px`;
             s.maxHeight = `${r.height}px`;
         }
     };
@@ -2859,6 +2931,13 @@ async function boot() {
         onFontsTabMount: (el) => fonts.mount(el),
         onPickAgain: () => startPicking(),
         onOpenTemplates: () => toggleTemplates(),
+        // Кнопка в шапке окна редактора: открыть / закрыть панель кода
+        onToggleCode: () => {
+            if (editor.isOpen?.()) editor.hidePanel();
+            else { editor.showPanel(); editor.setContent(customCSS); applyDock(); }
+            inspector.refreshTools?.();
+        },
+        isCodeOpen: () => !!editor.isOpen?.(),
         onUndo: undo,
         onRedo: redo,
         isLite: () => !!cfg().liteEffects,
@@ -2877,12 +2956,20 @@ async function boot() {
               title: 'Пузырь сообщения, цвета текста, ник и дата, бейджи — у бота и у вас вместе или отдельно',
               onClick: () => bubbles.togglePanel(),
               isActive: () => !!bubbles.isOpen?.() },
+            { id: 'bottombar', icon: 'fa-keyboard', label: 'Нижняя панель',
+              title: 'Панель ввода: фон, рамка, форма, кнопки и их значки, поле ввода, своя надпись в пустом поле',
+              onClick: () => bottombar.togglePanel(),
+              isActive: () => !!bottombar.isOpen?.() },
             { id: 'headers', icon: 'fa-heading', label: 'Заголовки',
               title: 'Стили всех заголовков: рамки, цвета, украшения', onClick: () => headers.togglePanel(),
               isActive: () => !!headers.isOpen?.() },
             { id: 'fonts', icon: 'fa-font', label: 'Шрифты',
               title: 'Шрифты: весь интерфейс, сообщения, имена, поле ввода…', onClick: () => toggleFontsWindow(),
               isActive: () => !!document.getElementById('vte-fonts-panel') && document.getElementById('vte-fonts-panel').style.display !== 'none' },
+            { id: 'templates', icon: 'fa-layer-group', label: 'Шаблоны',
+              title: 'Шаблоны групп: собрать однотипные элементы и править их вместе',
+              onClick: () => { toggleTemplates(); inspector.refreshTools?.(); },
+              isActive: () => { const p = document.getElementById('vte-templates-panel'); return !!p && p.style.display !== 'none'; } },
             { id: 'perf', icon: 'fa-feather', label: 'Облегчить',
               title: 'Выключить размытие, мягкие тени и градиенты во всей таверне — записывается в CSS',
               onClick: (el) => openToolPop(el, buildPerfPop),
@@ -2923,8 +3010,11 @@ async function boot() {
         onUndo: undo,
         onRedo: redo,
         // Кнопка в шапке панели кода: открыть окно редактора
+        // Кнопка в окне кода: открыть окно редактора, повторно — закрыть
         onOpenEditor: () => {
             if (!active) { activate(); return; }
+            const insp = document.getElementById('vte-inspector-panel');
+            if (insp && insp.style.display !== 'none') { inspector.hidePanel(); return; }
             inspector.createPanel();
             applyDock();
             inspector.refreshTools?.();
@@ -2932,6 +3022,7 @@ async function boot() {
     });
     // Тема окон (стандартная / под таверну / роза) — сразу для всех панелей
     try { editor.applyUiTheme?.(); } catch {}
+    try { updateFloatBtn(); } catch {}
 
     gallery.init({
         onApply: applyToolRules,
@@ -2951,6 +3042,20 @@ async function boot() {
         onApply: applyToolRules,
         onSnapshot: () => snapshotFor('avatars'),
         onRestore: () => restoreFor('avatars'),
+        onReadRules: () => generator.autoRules(customCSS),
+        onThemeRules: themeRulesForParts,
+        onReveal: (from, to) => {
+            if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
+            setTimeout(() => editor.revealRange?.(from, to, { focus: true, hold: 4000 }), 60);
+        },
+        onToast: (t) => toast(t),
+        picker,
+    });
+
+    bottombar.init({
+        onApply: applyToolRules,
+        onSnapshot: () => snapshotFor('bottombar'),
+        onRestore: () => restoreFor('bottombar'),
         onReadRules: () => generator.autoRules(customCSS),
         onThemeRules: themeRulesForParts,
         onReveal: (from, to) => {

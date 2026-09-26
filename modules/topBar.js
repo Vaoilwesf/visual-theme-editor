@@ -804,15 +804,16 @@ function render() {
         section('Замена значков', [iconList()]),
         h('div.vte-tb-foot', {}, [
             h('button.vte-btn', {
-                type: 'button',
+                type: 'button', title: 'Убрать всё, что это окно записало в тему. Останется оформление самой темы — не SillyTavern по умолчанию',
                 on: { click: resetAll },
-            }, [icon('fa-rotate-left'), h('span', { text: ' Вернуть топ-бар темы' })]),
+            }, [icon('fa-rotate-left'), h('span', { text: ' Сбросить все настройки окна' })]),
             h('button.vte-btn', {
                 type: 'button',
-                title: 'Вернуть тему к тому виду, какой был при открытии этого окна — включая строки, заменённые прямо в теме',
+                title: 'Отменить всё, что сделано с момента открытия этого окна, — включая строки, заменённые прямо в теме',
                 on: { click: () => { onRestore?.() ? say('Вернула как было при открытии окна') : say('Возвращать нечего'); render(); } },
             }, [icon('fa-clock-rotate-left'), h('span', { text: ' Как было до открытия' })]),
         ]),
+        h('small.vte-note.vte-foot-note', { text: '«Как было до открытия» — отменить всё, что сделано с момента открытия окна. «Сбросить все настройки окна» — убрать всё, что это окно когда-либо записало в тему: останется оформление самой темы.' }),
     );
 }
 
@@ -1084,8 +1085,11 @@ function openGlyphPicker(it, anchor) {
         ...icons.cats.map((c, i) => h('option', { value: String(i), text: c.label }))]);
 
     const faPane = h('div.vte-tb-pane', {}, [h('div.vte-tb-pop-tools', {}, [search, cats, count]), grid]);
-    const imgPane = imagePane(it);
-    imgPane.style.display = 'none';
+    // Уже стоит картинка (наша или темы) — сразу показываем её ссылку или код
+    const nowImg = (state.glyphs[it.sel] && state.glyphs[it.sel].img) || currentGlyph(it)?.img || '';
+    const imgPane = imagePane(it, nowImg);
+    imgPane.style.display = nowImg ? '' : 'none';
+    faPane.style.display = nowImg ? 'none' : '';
 
     const tab = (label, show) => h('button.vte-tb-tab', {
         type: 'button',
@@ -1099,26 +1103,44 @@ function openGlyphPicker(it, anchor) {
         },
     }, [h('span', { text: label })]);
     const tabFa = tab('Font Awesome', 'fa');
-    tabFa.classList.add('active');
+    const tabImg = tab('Ссылка / SVG', 'img');
+    (nowImg ? tabImg : tabFa).classList.add('active');
 
     glyphPop = h('div.vte-tb-pop', {}, [
         h('div.vte-tb-pop-head', {}, [
             h('span', { text: `Значок: ${it.label}` }),
             iconBtn('fa-xmark', 'Закрыть', closeGlyphPicker, 'vte-tb-mini'),
         ]),
-        h('div.vte-tb-tabs', {}, [tabFa, tab('Ссылка / SVG', 'img')]),
+        h('div.vte-tb-tabs', {}, [tabFa, tabImg]),
         faPane,
         imgPane,
     ]);
     panel.appendChild(glyphPop);
     run();
-    setTimeout(() => search.focus(), 0);
+    if (!nowImg) setTimeout(() => search.focus(), 0);
+}
+
+/** Картинка значка → что показать в полях: ссылку или раскодированный SVG.
+    Отдаём и другим окнам — у всех один способ */
+export function imageFields(img) {
+    const v = String(img || '');
+    const m = v.match(/^data:image\/svg\+xml(;base64)?,([\s\S]*)$/i);
+    if (!m) return { url: v, code: '' };
+    try {
+        const svg = m[1] ? atob(m[2]) : decodeURIComponent(m[2]);
+        return { url: '', code: svg.replace(/'/g, '"') };
+    } catch { return { url: '', code: '' }; }
 }
 
 /** Своя картинка для значка: ссылка или вставленный код SVG */
-function imagePane(it) {
-    const url = h('input.vte-input', { type: 'text', spellcheck: false, placeholder: 'https://… ссылка на .svg / .png / .webp' });
+function imagePane(it, nowImg = '') {
+    const was = imageFields(nowImg);
+    const url = h('input.vte-input', { type: 'text', spellcheck: false, placeholder: 'https://… ссылка на .svg / .png / .webp', value: was.url });
     const code = h('textarea.vte-input.vte-tb-svg', { spellcheck: false, placeholder: 'или вставьте код <svg>…</svg>', rows: 4 });
+    code.value = was.code;
+    // Что-то одно: ссылка или код — чтобы не гадать, что применится
+    url.addEventListener('input', () => { if (url.value.trim()) code.value = ''; });
+    code.addEventListener('input', () => { if (code.value.trim()) url.value = ''; });
 
     const put = () => {
         let img = '';
@@ -1140,6 +1162,7 @@ function imagePane(it) {
     };
 
     return h('div.vte-tb-pane.vte-tb-imgpane', {}, [
+        nowImg ? h('div.vte-note', { text: 'Сейчас стоит эта картинка — можно поправить или вставить другую.' }) : null,
         url,
         code,
         h('button.vte-btn.vte-btn-primary', { type: 'button', on: { click: put } },

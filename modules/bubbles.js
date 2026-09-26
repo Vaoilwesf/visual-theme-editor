@@ -56,8 +56,13 @@ const S = {
     // текст
     text: (r) => `${base(r)} .mes_text`,
     reason: (r) => `${base(r)} .mes_reasoning_details`,
+    blockR: (r) => `${base(r)} .mes_block`,
+    // последнее сообщение с видимыми стрелками свайпа — место под них снизу
+    lastText: (r) => `${base(r)}.last_mes:is(.swipes_visible, .last_swipe) .mes_text`,
     strong: (r) => `${base(r)} .mes_text strong`,
-    link: (r) => `${base(r)} .mes_text a`,
+    link: (r) => `${base(r)} .mes_text a`,          // бывшая настройка «Ссылки» — только стереть
+    quote: (r) => `${base(r)} .mes_text blockquote`,
+    hr: (r) => `${base(r)} .mes_text hr`,
     // кнопки
     btns: (r) => `${base(r)} .mes_buttons`,
     btnAll: (r) => `${base(r)} :is(.mes_button, .extraMesButtons > div)`,
@@ -67,7 +72,7 @@ const S = {
     editBtn: (r) => `${base(r)} .mes_edit_buttons .menu_button`,
     nameBox: (r) => `${base(r)} .ch_name > .flex1`,
     // пузырь: #chat — чтобы надёжно перекрыть и тему, и «Аватарки»
-    box: (r, t) => (t === 'mes' ? `#chat ${base(r)}` : `#chat ${base(r)} .mes_block`),
+    box: (r, t) => (t === 'mes' ? `#chat ${base(r)}` : t === 'text' ? `#chat ${base(r)} .mes_text` : `#chat ${base(r)} .mes_block`),
 };
 
 /* Общие (без деления на бота и пользователя) */
@@ -104,6 +109,43 @@ const GLYPHS = [
     ]],
 ];
 const glyphSel = (cls) => `.mes .${cls}::before`;
+
+/** Отступ блока с текстом слева в теме — у живого сообщения этой роли */
+function blockPadLeft(r) {
+    try {
+        const q = r === 'user' ? '[is_user="true"]' : r === 'bot' ? '[is_user="false"]' : '';
+        const b = document.querySelector(`#chat .mes${q}:not(.smallSysMes) .mes_block`);
+        return b ? Math.round(parseFloat(getComputedStyle(b).paddingLeft) || 0) : 10;
+    } catch { return 10; }
+}
+
+/* Декор по бокам чата. Полоса со значками панелей (#top-settings-holder)
+   в ST ровно той же ширины, что и чат (--sheldWidth; на телефоне у обоих
+   весь экран), и уже служит опорой (position: relative). Её ::before и
+   ::after свободны — ни ST, ни другие окна их не используют. Картинки
+   держатся за левый и правый край чата: меняешь ширину чата — едут вместе
+   с ним. Размеры в vw: при масштабе браузера (Ctrl +/−) не меняются. */
+const DECOR = { L: '#top-settings-holder::before', R: '#top-settings-holder::after' };
+/* Начальные значения — как в примере темы (левая и правая «записка») */
+const DECOR_START = {
+    L: { w: 13, h: 33, x: -12, y: 15 },
+    R: { w: 78, h: 27, x: 44, y: 35 },
+};
+
+/* Условия для полосы прокрутки. Телефон — сенсорный экран без мыши,
+   ПК — есть мышь: так узкое окно браузера на ПК не примут за телефон */
+const DEV = {
+    phone: '@media (hover: none) and (pointer: coarse)',
+    pc: '@media (hover: hover) and (pointer: fine)',
+};
+const FF = '@supports not selector(::-webkit-scrollbar)';
+const COND_SEP = '\u0001';
+/** Ключ правила внутри условия — так же, как хранит блок «Мои правки» */
+const ck = (cond, sel) => (cond ? `${cond}${COND_SEP}${sel}` : sel);
+function splitCond(key) {
+    const i = key.indexOf(COND_SEP);
+    return i === -1 ? { cond: '', sel: key } : { cond: key.slice(0, i), sel: key.slice(i + 1) };
+}
 
 /* Старая схема сдвига текста (margin-top у текста) — только стереть */
 const OLD = {
@@ -163,12 +205,20 @@ function iconBtn(faName, title, onClick, extra) {
    СОСТОЯНИЕ
 ============================================================ */
 /* Поля, которые бывают разными у бота и у пользователя, по разделам */
+function decorDefaults(side) {
+    const st = DECOR_START[side];
+    return {
+        [`d${side}img`]: '', [`d${side}w`]: st.w, [`d${side}h`]: st.h, [`d${side}x`]: st.x, [`d${side}y`]: st.y,
+        [`d${side}op`]: 100, [`d${side}flip`]: false, [`d${side}front`]: false,
+    };
+}
+
 const ROLE_GROUPS = {
     bubble: ['bg', 'bw', 'bc', 'radius', 'padT', 'padB', 'padX', 'maxW', 'fsMin', 'fsMax'],
-    colors: ['cText', 'cEm', 'cStrong', 'cQuote', 'cU', 'cLink'],
-    text: ['offY', 'offX'],
+    colors: ['cText', 'cEm', 'cStrong', 'cQuote', 'cU', 'bqText', 'bqBar', 'bqBarW', 'bqBg', 'hrColor', 'hrStyle', 'hrThick', 'hrOp'],
+    text: ['textFull', 'offY', 'offX', 'textW', 'textAlign'],
     names: ['nameCorner', 'nameX', 'nameY', 'datePos', 'dateX', 'dateY', 'nameSize', 'nameColor', 'nameNoWrap', 'nameWidth', 'dateSize', 'dateColor'],
-    buttons: ['btnPlace', 'btnCorner', 'btnXMin', 'btnXMax', 'btnYMin', 'btnYMax', 'btnDir',
+    buttons: ['btnTop', 'btnPlace', 'btnCorner', 'btnXMin', 'btnXMax', 'btnYMin', 'btnYMax', 'btnDir',
         'btnSMin', 'btnSMax', 'btnColor', 'btnOpacity', 'btnHover', 'btnBg', 'btnRadius', 'btnPad', 'btnGap', 'btnNoShadow',
         'edPlace', 'edCorner', 'edXMin', 'edXMax', 'edYMin', 'edYMax', 'edSize', 'edOpacity', 'edRadius', 'edGap'],
 };
@@ -177,8 +227,15 @@ const GROUP_OF = Object.fromEntries(Object.entries(ROLE_GROUPS).flatMap(([g, key
 function roleDefaults() {
     return {
         bg: '', bw: 0, bc: '', radius: 0, padT: 0, padB: 0, padX: 0, maxW: 0, fsMin: 0, fsMax: 0,
-        cText: '', cEm: '', cStrong: '', cQuote: '', cU: '', cLink: '',
+        cText: '', cEm: '', cStrong: '', cQuote: '', cU: '',
+        // цитата (> текст): текст, полоса слева, её толщина, фон
+        bqText: '', bqBar: '', bqBarW: 0, bqBg: '',
+        // горизонтальная линия (---): цвет, вид, толщина, видимость
+        hrColor: '', hrStyle: '', hrThick: 0, hrOp: 0,
         offY: 0, offX: 0,
+        textFull: false,   // текст во всю ширину пузыря (без запаса ST под стрелки)
+        textW: 0,          // ширина текста, % от пузыря (0 — как в теме)
+        textAlign: '',     // '' | left | center | right | justify
         // nameCorner: '' — сдвиг от своего места; 'top-left' и т.д. — в углу
         // пузыря, nameX / nameY — расстояние от его краёв
         nameCorner: '', nameX: 0, nameY: 0, datePos: '', dateX: 0, dateY: 0,
@@ -186,6 +243,7 @@ function roleDefaults() {
         dateSize: 0, dateColor: '',
         // кнопки: где стоят ('' как в теме | row — в строке ника | after — сразу
         // после ника и даты | block — в углу блока с текстом), сдвиги телефон/ПК
+        btnTop: false,     // поверх всего в сообщении и соседних сообщениях
         btnPlace: '', btnCorner: 'top-right', btnXMin: 0, btnXMax: 0, btnYMin: 0, btnYMax: 0, btnDir: '',
         btnSMin: 0, btnSMax: 0, btnColor: '', btnOpacity: 0, btnHover: 0, btnBg: '', btnRadius: 0, btnPad: 0, btnGap: 0,
         btnNoShadow: false,
@@ -211,6 +269,15 @@ function defaults() {
         badgeAlign: 'center',
         badgeX: 0, badgeY: 0, badgeGap: 4, badgeStair: 14,
         badgeSize: 0, badgeColor: '', badgeBg: '', badgeRadius: 0, badgePad: 0,
+
+        // полоса прокрутки
+        sbScope: 'chat',   // chat — только чат | all — весь интерфейс
+        sbHide: '',        // '' | phone | pc | both
+        sbWhere: 'both',   // где менять вид: both | pc | phone
+        sbW: 0, sbThumb: '', sbTrack: '', sbRadius: 0, sbImg: '', sbFit: 'stretch',
+
+        // декор по бокам чата: слева (dL…) и справа (dR…), всё в vw
+        ...decorDefaults('L'), ...decorDefaults('R'),
     };
 }
 
@@ -298,14 +365,27 @@ const READ = {
             cQuote: get(S.text(r), '--SmartThemeQuoteColor'),
             cU: get(S.text(r), '--SmartThemeUnderlineColor'),
             cStrong: get(S.strong(r), 'color'),
-            cLink: get(S.link(r), 'color'),
+            bqText: get(S.quote(r), 'color'),
+            bqBar: get(S.quote(r), 'border-left-color'),
+            bqBarW: num(get(S.quote(r), 'border-left-width')),
+            bqBg: get(S.quote(r), 'background-color'),
+            hrColor: get(S.hr(r), '--vte-hr-color'),
+            hrStyle: get(S.hr(r), '--vte-hr-style'),
+            hrThick: num(get(S.hr(r), '--vte-hr-thick')),
+            hrOp: Math.round((parseFloat(get(S.hr(r), 'opacity')) || 0) * 100),
         };
     },
     text(get, r) {
         // Старая схема: сдвиг лежал в margin-top текста
+        const ta = get(S.text(r), 'text-align');
+        const full = get(S.text(r), '--vte-text-full') === '1';
+        const w = full ? null : get(S.text(r), 'width').match(/^(\d+)%$/);
         return {
+            textFull: full,
             offY: num(get(S.chname(r), 'margin-bottom') || get(S.text(r), 'margin-top')),
-            offX: num(get(S.text(r), 'margin-left')),
+            offX: num(get(S.text(r), 'left') || (ta || w ? '' : get(S.text(r), 'margin-left'))),
+            textW: w ? +w[1] : 0,
+            textAlign: ({ left: 'left', center: 'center', right: 'right', justify: 'justify' })[ta] || '',
         };
     },
     buttons(get, r) {
@@ -377,7 +457,7 @@ function readState() {
 
     // Пузырь: какая цель задана — «всё сообщение» или «текст с ником»
     const hasBox = (t) => ROLES.some(r => rules.get(S.box(r, t))?.size);
-    s.target = !hasBox('block') && hasBox('mes') ? 'mes' : 'block';
+    s.target = hasBox('text') ? 'text' : !hasBox('block') && hasBox('mes') ? 'mes' : 'block';
 
     for (const g of Object.keys(ROLE_GROUPS)) {
         const rd = (r) => READ[g](get, r, s.target);
@@ -420,7 +500,48 @@ function readState() {
     s.badgeRadius = num(get(G.badges, 'border-radius'));
     s.badgePad = num(get(G.badges, 'padding'));
 
-    const any = [...rules.keys()].some(k => /\.mes\b/.test(k) && rules.get(k)?.size);
+    /* полоса прокрутки */
+    {
+        const hid = (c, e, p) => get(ck(c, e), 'scrollbar-width') === 'none' || get(ck(c, `${p}::-webkit-scrollbar`), 'display') === 'none';
+        for (const [scope, e, p] of [['chat', '#chat', '#chat'], ['all', '*', '']]) {
+            const inBoth = hid('', e, p), inPh = hid(DEV.phone, e, p), inPc = hid(DEV.pc, e, p);
+            if (inBoth || inPh || inPc) { s.sbScope = scope; s.sbHide = inBoth ? 'both' : inPh ? 'phone' : 'pc'; }
+            for (const [where, c] of [['both', ''], ['phone', DEV.phone], ['pc', DEV.pc]]) {
+                const bar = get(ck(c, `${p}::-webkit-scrollbar`), 'width');
+                const th = ck(c, `${p}::-webkit-scrollbar-thumb`);
+                const tc = get(th, 'background-color'), bi = get(th, 'background-image');
+                const tr2 = get(ck(c, `${p}::-webkit-scrollbar-track`), 'background-color');
+                if (!bar && !tc && !bi && !tr2 && !get(th, 'border-radius')) continue;
+                s.sbScope = scope;
+                s.sbWhere = where;
+                s.sbW = num(bar);
+                s.sbThumb = tc === 'transparent' ? '' : tc;
+                s.sbTrack = tr2;
+                s.sbRadius = num(get(th, 'border-radius'));
+                const m = bi.match(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s]*))\s*\)/);
+                s.sbImg = m ? (m[1] ?? m[2] ?? m[3]) : '';
+                s.sbFit = get(th, 'background-size') === 'contain' ? 'contain' : 'stretch';
+            }
+        }
+    }
+
+    /* декор по бокам чата */
+    for (const side of ['L', 'R']) {
+        const sel = DECOR[side];
+        const bg = get(sel, 'background-image').match(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s]*))\s*\)/);
+        if (!bg) continue;
+        s[`d${side}img`] = bg[1] ?? bg[2] ?? bg[3];
+        const vw = (v) => { const m = String(v).match(/(-?\d+(?:\.\d+)?)vw/); return m ? +m[1] : 0; };
+        s[`d${side}w`] = vw(get(sel, 'width'));
+        s[`d${side}h`] = vw(get(sel, 'height'));
+        const t = get(sel, 'transform').match(/translate\(\s*(-?\d+(?:\.\d+)?)vw\s*,\s*calc\(-50%\s*\+\s*(-?\d+(?:\.\d+)?)vw\)\s*\)/);
+        if (t) { s[`d${side}x`] = +t[1]; s[`d${side}y`] = +t[2]; }
+        s[`d${side}flip`] = /scaleX\(-1\)/.test(get(sel, 'transform'));
+        s[`d${side}op`] = Math.round((parseFloat(get(sel, 'opacity')) || 1) * 100);
+        s[`d${side}front`] = get(sel, 'z-index') === '5';
+    }
+
+    const any = [...rules.keys()].some(k => (/\.mes\b|scrollbar/.test(k) || k.startsWith('#top-settings-holder')) && rules.get(k)?.size);
     s.on = any;
     return s;
 }
@@ -444,7 +565,7 @@ function buildRules(s) {
 
     /* ---------- пузырь ---------- */
     each('bubble', (r, v) => {
-        for (const t of ['block', 'mes']) {
+        for (const t of ['block', 'mes', 'text']) {
             const box = S.box(r, t);
             const w = v && s.target === t ? v : null;
             put(box, 'background-color', w?.bg || '');
@@ -475,21 +596,77 @@ function buildRules(s) {
         put(S.text(r), '--SmartThemeQuoteColor', v?.cQuote || '');
         put(S.text(r), '--SmartThemeUnderlineColor', v?.cU || '');
         put(S.strong(r), 'color', v?.cStrong || '');
-        put(S.link(r), 'color', v?.cLink || '');
+        put(S.link(r), 'color', '');
+
+        /* Цитата. В ST: полоса слева цвета кавычек и тёмный фон */
+        put(S.quote(r), 'color', v?.bqText || '');
+        put(S.quote(r), 'border-left-color', v?.bqBar || '');
+        put(S.quote(r), 'border-left-width', v?.bqBarW ? `${v.bqBarW}px` : '');
+        put(S.quote(r), 'background-color', v?.bqBg || '');
+
+        /* Горизонтальная линия. В ST это не рамка, а градиент, тающий к
+           краям, высотой 1px и видимостью 40%. «Тающая» — тот же градиент
+           своим цветом; «сплошная» — заливка; пунктир и точки — рамка */
+        const hs = v?.hrStyle || '';
+        const hc = v?.hrColor || (hs ? 'currentColor' : '');
+        const ht = v?.hrThick || (hs ? 1 : 0);
+        const hrOn = !!(v && (hs || v.hrColor || v.hrThick));
+        const kind = hs || 'fade';
+        const line = kind === 'dashed' || kind === 'dotted';
+        put(S.hr(r), '--vte-hr-color', v?.hrColor || '');
+        put(S.hr(r), '--vte-hr-style', hs);
+        put(S.hr(r), '--vte-hr-thick', v?.hrThick ? String(v.hrThick) : '');
+        put(S.hr(r), 'background-image', hrOn ? (kind === 'fade' ? `linear-gradient(90deg, transparent, ${hc}, transparent)` : 'none') : '');
+        put(S.hr(r), 'background-color', hrOn && kind === 'solid' ? hc : '');
+        put(S.hr(r), 'height', hrOn ? (line ? '0' : `${ht}px`) : '');
+        put(S.hr(r), 'min-height', hrOn ? (line ? '0' : `${ht}px`) : '');
+        put(S.hr(r), 'border-top', hrOn && line ? `${ht}px ${kind} ${hc}` : '');
+        put(S.hr(r), 'opacity', v?.hrOp ? String(r2(v.hrOp / 100)) : '');
     });
 
     /* ---------- положение текста ----------
        Вверх-вниз — отступ под строкой ника: под ней идёт то, что есть
        (рассуждения или сразу текст), расстояние одинаковое всегда. */
     let lifted = false;
+    let textFullAll = false;   // «во всю ширину» в общем правиле — перенос слов не затирать
     each('text', (r, v) => {
         if (v && v.offY < 0) lifted = true;
         put(S.chname(r), 'margin-bottom', px(v?.offY));
-        put(S.text(r), 'margin-left', px(v?.offX));
-        put(S.reason(r), 'margin-left', px(v?.offX));
         // У рассуждений в ST свой отступ сверху — при заданном сдвиге убираем
         put(S.reason(r), 'margin-top', v?.offY ? '0' : '');
         put(S.text(r), 'margin-top', '');   // старая схема
+
+        /* Ширина и выравнивание. В ST у текста справа padding 30px — место
+           под стрелки свайпа (они есть только у последнего сообщения). Из-за
+           него отступы от краёв пузыря разные. Задаёшь ширину или
+           выравнивание — этот запас убираем, а место под стрелки остаётся
+           только у последнего сообщения, снизу. Блок текста встаёт в пузыре
+           слева, по центру или справа — отступы по бокам одинаковые. */
+        const al = v?.textAlign || '';
+        // Во всю ширину — как в теме Rusreal: текст от края до края блока,
+        // без запаса 30px справа, длинные слова переносятся, а не режутся
+        const full = !!v?.textFull;
+        if (full && r === 'all') textFullAll = true;
+        put(S.text(r), '--vte-text-full', full ? '1' : '');
+        const shaped = !!(v && (full || v.textW || al));
+        const W = full ? '100%' : v?.textW ? `${v.textW}%` : '';
+        const [ml, mr] = !shaped ? ['', ''] : full ? ['0', '0'] : al === 'left' ? ['0', 'auto'] : al === 'right' ? ['auto', '0'] : ['auto', 'auto'];
+        if (r !== 'all') put(S.text(r), 'overflow-wrap', full ? 'anywhere' : '');
+        for (const sel of [S.text(r), S.reason(r)]) {
+            put(sel, 'width', W);
+            put(sel, 'box-sizing', W ? 'border-box' : '');
+            put(sel, 'margin-left', shaped ? ml : px(v?.offX));
+            put(sel, 'margin-right', shaped ? mr : '');
+            // Со своим выравниванием сдвиг вбок идёт поверх, а не вместо него
+            put(sel, 'position', shaped && v.offX ? 'relative' : '');
+            put(sel, 'left', shaped && v.offX ? `${v.offX}px` : '');
+        }
+        put(S.text(r), 'text-align', al);
+        put(S.text(r), 'padding-right', shaped ? '0' : '');
+        // У блока с текстом в ST отступ только слева (от аватарки) — ставим
+        // такой же справа, чтобы «по центру» было по центру пузыря
+        put(S.blockR(r), 'padding-right', shaped ? `${blockPadLeft(r)}px` : '');
+        put(S.lastText(r), 'padding-bottom', shaped ? 'calc(25px + var(--swipeCounterHeight, 15px) + var(--swipeCounterMargin, 5px))' : '');
     });
     put(OLD.botReason, 'margin-top', '');
     put(OLD.botReason, 'margin-left', '');
@@ -565,6 +742,16 @@ function buildRules(s) {
         };
         const pb = placeBox(S.btns(r), 'btn');
         const pe = placeBox(S.edit(r), 'ed');
+        /* Поверх: кнопки выше текста, аватарки и соседних сообщений, их не
+           режет край пузыря. Сообщение под пальцем/мышью поднимается над
+           соседними — иначе следующее сообщение перекрыло бы кнопки */
+        const top = !!v?.btnTop;
+        if (top) btnOut = true;
+        for (const [sel, p] of [[S.btns(r), pb], [S.edit(r), pe]]) {
+            if (!p) put(sel, 'position', top ? 'relative' : '');
+            put(sel, 'z-index', top ? '100' : p ? '5' : '');
+        }
+        put(`${base(r)}:is(:hover, :focus-within)`, 'z-index', top ? '5' : '');
         // опора для «в углу блока с текстом»
         if (pb === 'block' || pe === 'block') blockRel[r] = true;
         // «сразу после ника»
@@ -618,10 +805,79 @@ function buildRules(s) {
         }
     }
 
+    /* ---------- полоса прокрутки ----------
+       Скрыть — scrollbar-width: none (Firefox и новый Chrome) и
+       ::-webkit-scrollbar { display: none } (Chrome, Android, Safari):
+       полосы нет, листать можно как раньше — колёсиком и пальцем.
+       Телефон и ПК различаем по устройству, а не по ширине окна. */
+    {
+        const pfx = s.sbScope === 'all' ? '' : '#chat';
+        const el = s.sbScope === 'all' ? '*' : '#chat';
+        const hideIn = !on || !s.sbHide ? [] : s.sbHide === 'both' ? [''] : [DEV[s.sbHide]];
+        for (const c of ['', DEV.phone, DEV.pc]) {
+            for (const [e, p] of [['*', ''], ['#chat', '#chat']]) {
+                const mine = e === el;
+                put(ck(c, e), 'scrollbar-width', mine && hideIn.includes(c) ? 'none' : '');
+                put(ck(c, `${p}::-webkit-scrollbar`), 'display', mine && hideIn.includes(c) ? 'none' : '');
+            }
+        }
+        // Вид — там, где полоса не спрятана
+        const styleIn = on && s.sbWhere !== s.sbHide && s.sbHide !== 'both' ? (s.sbWhere === 'both' ? '' : DEV[s.sbWhere]) : null;
+        const img = styleIn != null && s.sbImg
+            ? `url("${String(s.sbImg).replace(/["\\\n\r]/g, encodeURIComponent)}")` : '';
+        for (const c of ['', DEV.phone, DEV.pc]) {
+            for (const p of ['', '#chat']) {
+                const act = styleIn === c && p === pfx;
+                const bar = ck(c, `${p}::-webkit-scrollbar`), thumb = ck(c, `${p}::-webkit-scrollbar-thumb`), track = ck(c, `${p}::-webkit-scrollbar-track`);
+                put(bar, 'width', act && s.sbW ? `${s.sbW}px` : '');
+                put(bar, 'height', act && s.sbW ? `${s.sbW}px` : '');
+                put(thumb, 'border-radius', act && s.sbRadius ? `${s.sbRadius}px` : '');
+                // Своя картинка: целиком на ползунке, без рамки и тени ST
+                put(thumb, 'background-image', act ? img : '');
+                put(thumb, 'background-size', act && img ? (s.sbFit === 'contain' ? 'contain' : '100% 100%') : '');
+                put(thumb, 'background-position', act && img ? 'center' : '');
+                put(thumb, 'background-repeat', act && img ? 'no-repeat' : '');
+                put(thumb, 'background-color', act && img ? 'transparent' : (act ? s.sbThumb : ''));
+                put(thumb, 'background-clip', act && img ? 'border-box' : '');
+                put(thumb, 'border', act && img ? 'none' : '');
+                put(thumb, 'box-shadow', act && img ? 'none' : '');
+                put(track, 'background-color', act ? s.sbTrack : '');
+            }
+        }
+        // Firefox не знает ::-webkit-scrollbar — ему цвета отдельно (только «везде»)
+        const ff = styleIn === '' && (s.sbThumb || s.sbTrack);
+        for (const e of ['*', '#chat']) {
+            put(ck(FF, e), 'scrollbar-color', ff && e === el ? `${s.sbThumb || 'auto'} ${s.sbTrack || 'transparent'}` : '');
+        }
+    }
+
+    /* ---------- декор по бокам чата ---------- */
+    for (const side of ['L', 'R']) {
+        const sel = DECOR[side];
+        const img = on ? s[`d${side}img`] : '';
+        const u = img ? `url("${String(img).replace(/["\\\n\r]/g, encodeURIComponent)}")` : '';
+        const n = (k) => r2(+s[`d${side}${k}`] || 0);
+        put(sel, 'content', img ? '""' : '');
+        put(sel, 'position', img ? 'absolute' : '');
+        put(sel, 'top', img ? '50%' : '');
+        put(sel, side === 'L' ? 'left' : 'right', img ? '0' : '');
+        put(sel, 'width', img ? `${n('w')}vw` : '');
+        put(sel, 'height', img ? `${n('h')}vw` : '');
+        put(sel, 'background-image', u);
+        put(sel, 'background-size', img ? 'contain' : '');
+        put(sel, 'background-position', img ? 'center' : '');
+        put(sel, 'background-repeat', img ? 'no-repeat' : '');
+        put(sel, 'transform', img ? `translate(${n('x')}vw, calc(-50% + ${n('y')}vw))${s[`d${side}flip`] ? ' scaleX(-1)' : ''}` : '');
+        put(sel, 'opacity', img && s[`d${side}op`] < 100 ? String(r2(s[`d${side}op`] / 100)) : '');
+        // Под открытыми панелями (но над чатом) или поверх всего
+        put(sel, 'z-index', img ? (s[`d${side}front`] ? '5' : '-1') : '');
+        put(sel, 'pointer-events', img ? 'none' : '');
+    }
+
     /* ---------- место справа, обрезка, промежутки ---------- */
     const rs = on && s.rightSpace;
     put(G.mes, '--mes-right-spacing', rs ? `${s.rightSpace}px` : '');
-    put(G.text, 'overflow-wrap', rs ? 'anywhere' : '');
+    put(G.text, 'overflow-wrap', rs || textFullAll ? 'anywhere' : '');
     put(G.chname, 'min-width', rs ? '0' : '');
     // ST режет всё, что вылезает за край блока, — поднятый текст пропадал
     // сверху. Сверху открываем при подъёме текста или сдвиге ника; по бокам
@@ -693,9 +949,11 @@ let previewRaf = 0;
 function paintPreview() {
     previewRaf = 0;
     let css = '';
-    for (const [sel, decls] of Object.entries(buildRules(state))) {
+    for (const [key, decls] of Object.entries(buildRules(state))) {
         const body = Object.entries(decls).filter(([, v]) => v).map(([p, v]) => `${p}:${v} !important`).join(';');
-        if (body) css += `${sel}{${body}}\n`;
+        if (!body) continue;
+        const { cond, sel } = splitCond(key);
+        css += cond ? `${cond}{${sel}{${body}}}\n` : `${sel}{${body}}\n`;
     }
     if (!previewStyle) {
         previewStyle = document.createElement('style');
@@ -717,7 +975,10 @@ function clearPreview() {
 }
 
 async function commit() {
-    const list = Object.entries(buildRules(state)).map(([selector, decls]) => ({ selector, decls }));
+    const list = Object.entries(buildRules(state)).map(([key, decls]) => {
+        const { cond, sel } = splitCond(key);
+        return { selector: sel, decls, media: cond };
+    });
     const changed = await onApply?.(list);
     clearPreview();
     return changed;
@@ -788,11 +1049,11 @@ function row(label, control, hint) {
     return h('div.vte-tb-row', { title: hint || '' }, [h('span.vte-tb-label', { text: label }), control]);
 }
 
-function slider(key, min, max, unit, zeroText, hint) {
+function slider(key, min, max, unit, zeroText, hint, step = 1) {
     const out = h('span.vte-tb-val');
     const show = () => { const v = val(key); out.textContent = v ? `${v}${unit}` : zeroText; };
     const input = h('input.vte-tb-range', {
-        type: 'range', min: String(min), max: String(max), step: '1', value: String(val(key) || 0),
+        type: 'range', min: String(min), max: String(max), step: String(step), value: String(val(key) || 0),
         title: hint || '',
         on: {
             input: (e) => { setVal(key, +e.target.value); show(); preview(); },
@@ -931,7 +1192,7 @@ function select(key, options, after) {
 }
 
 /* Какие разделы раскрыты */
-const open = { bubble: true, colors: false, text: false, names: false, buttons: false, badges: false };
+const open = { bubble: true, colors: false, text: false, names: false, buttons: false, decor: false, scroll: false, badges: false };
 
 function group(id, title, children) {
     const list = children.filter(Boolean);
@@ -986,8 +1247,11 @@ function screen() {
 
         group('bubble', 'Пузырь', [
             row('Что считать пузырём', select('target', [
-                ['block', 'текст с ником'], ['mes', 'всё сообщение с аватаркой'],
+                ['block', 'текст с ником'], ['text', 'только текст (рамка идёт за ним)'], ['mes', 'всё сообщение с аватаркой'],
             ], () => render())),
+            val('target') === 'text' ? h('small.vte-note', {
+                text: 'Рамка и фон — у самого текста: поднимаешь, опускаешь, сдвигаешь или сужаешь текст — пузырь едет вместе с ним.',
+            }) : null,
             roleBar('bubble'),
             row('Фон', colorBtn('bg', 'как в теме')),
             row('Обводка', slider('bw', 0, 8, 'px', 'нет')),
@@ -1001,8 +1265,10 @@ function screen() {
                 'Считается от ширины чата — на телефоне и ПК пропорция одна'),
             pair('Размер текста', 'fsMin', 'fsMax', 32, 'Первое — на узком экране, второе — на широком'),
             h('div.vte-bb-shared', { text: 'Общее для всех сообщений' }),
-            row('Место справа под стрелки', slider('rightSpace', 0, 40, 'px', 'как в теме (30px)'),
-                'В SillyTavern справа от текста оставлено 30px под стрелки свайпа. Меньше — текст шире'),
+            // Старая настройка: заменена «Шириной текста» и «Выравниванием».
+            // Видна, только если уже задана в теме — чтобы её можно было сбросить
+            val('rightSpace') ? row('Старый отступ справа', slider('rightSpace', 0, 40, 'px', 'как в теме'),
+                'Раньше здесь менялся запас 30px справа от текста. Теперь это делают «Ширина текста» и «Выравнивание» в «Положении текста» — эту можно сбросить') : null,
             row('Между сообщениями', slider('gapMes', 0, 40, 'px', 'как в теме')),
         ]),
 
@@ -1013,16 +1279,39 @@ function screen() {
             row('**Жирный**', colorBtn('cStrong', 'как в теме')),
             row('«Кавычки»', colorBtn('cQuote', 'как в теме')),
             row('Подчёркнутый', colorBtn('cU', 'как в теме')),
-            row('Ссылки', colorBtn('cLink', 'как в теме')),
+            h('div.vte-bb-shared', { text: 'Цитата  (> текст)' }),
+            row('Текст цитаты', colorBtn('bqText', 'как в теме')),
+            row('Полоса слева', colorBtn('bqBar', 'цвет «кавычек»')),
+            row('Толщина полосы', slider('bqBarW', 0, 10, 'px', 'как в теме (3px)')),
+            row('Фон цитаты', colorBtn('bqBg', 'как в теме')),
+            h('div.vte-bb-shared', { text: 'Горизонтальная линия  (---)' }),
+            row('Вид', select('hrStyle', [['', 'как в теме'], ['fade', 'тающая к краям'], ['solid', 'сплошная'], ['dashed', 'пунктир'], ['dotted', 'точки']])),
+            row('Цвет линии', colorBtn('hrColor', 'как в теме')),
+            row('Толщина', slider('hrThick', 0, 8, 'px', 'как в теме (1px)')),
+            row('Видимость', slider('hrOp', 0, 100, '%', 'как в теме (40%)')),
+            h('div.vte-bb-shared', { text: 'Проверить на деле' }),
+            h('button.vte-btn', {
+                type: 'button', title: 'Скопировать сообщение со всеми видами разметки — вставьте его в чат и смотрите, как выглядит',
+                on: { click: copyMarkdown },
+            }, [icon('fa-copy'), h('span', { text: ' Скопировать маркдаун' })]),
             h('small.vte-note', { text: 'Курсив, кавычки и подчёркнутый меняются через цвета самой SillyTavern — '
                 + 'курсив внутри кавычек и рассуждения она по-прежнему красит сама.' }),
         ]),
 
         group('text', 'Положение текста', [
             roleBar('text'),
-            h('small.vte-note', { text: 'Отступ от ника — одинаковый в каждом сообщении, с блоком рассуждений и без него.' }),
-            row('Отступ от ника', slider('offY', -150, 300, 'px', 'нет')),
+            h('small.vte-note', { text: 'Выше-ниже — расстояние от ника, одинаковое в каждом сообщении, с блоком рассуждений и без него.' }),
+            check('textFull', 'Текст во всю ширину пузыря',
+                'Убирает запас 30px справа, который SillyTavern держит под стрелки свайпа: текст идёт от края до края, '
+                + 'отступы по бокам одинаковые. Место под стрелки остаётся только у последнего сообщения, снизу'),
+            row('Текст выше-ниже', slider('offY', -150, 300, 'px', 'нет')),
             row('Сдвиг вбок', slider('offX', -300, 300, 'px', 'нет')),
+            val('textFull') ? null : row('Ширина текста', slider('textW', 0, 100, '%', 'как в теме'),
+                'От ширины пузыря. Отступы по бокам становятся одинаковыми'),
+            val('textFull') ? h('small.vte-note', { text: 'Выравнивание строк работает и во всю ширину — например, «по ширине», как в Rusreal.' }) : null,
+            row('Выравнивание', select('textAlign', [
+                ['', 'как в теме'], ['left', 'по левому краю'], ['center', 'по центру'], ['right', 'по правому краю'], ['justify', 'по ширине'],
+            ], render), 'Выравнивает строки и ставит сам блок текста в пузыре слева, по центру или справа'),
         ]),
 
         group('names', 'Ник и дата', [
@@ -1051,6 +1340,10 @@ function screen() {
 
         group('buttons', 'Кнопки сообщения', buttonsUi()),
 
+        group('decor', 'Декор по бокам чата', decorUi()),
+
+        group('scroll', 'Полоса прокрутки', scrollUi()),
+
         group('badges', 'Бейджи (номер, время, токены)', [
             magnet('Привязать к ближайшему', anchorBadges,
                 'Найдёт ближайший край аватарки и выравнивание — бейджи останутся на месте, но будут держаться за аватарку'),
@@ -1078,14 +1371,15 @@ function screen() {
         ]),
 
         h('div.vte-tb-foot', {}, [
-            h('button.vte-btn', { type: 'button', on: { click: resetAll } },
-                [icon('fa-rotate-left'), h('span', { text: ' Вернуть как в теме' })]),
+            h('button.vte-btn', { type: 'button', title: 'Убрать всё, что это окно записало в тему. Останется оформление самой темы — не SillyTavern по умолчанию', on: { click: resetAll } },
+                [icon('fa-rotate-left'), h('span', { text: ' Сбросить все настройки окна' })]),
             h('button.vte-btn', {
                 type: 'button',
-                title: 'Вернуть тему к виду, какой был при открытии этого окна — включая строки, заменённые прямо в теме',
+                title: 'Отменить всё, что сделано с момента открытия этого окна, — включая строки, заменённые прямо в теме',
                 on: { click: () => { onRestore?.() ? say('Вернула как было при открытии окна') : say('Возвращать нечего'); render(); } },
             }, [icon('fa-clock-rotate-left'), h('span', { text: ' Как было до открытия' })]),
         ]),
+        h('small.vte-note.vte-foot-note', { text: '«Как было до открытия» — отменить всё, что сделано с момента открытия окна. «Сбросить все настройки окна» — убрать всё, что это окно когда-либо записало в тему: останется оформление самой темы.' }),
     ];
 }
 
@@ -1131,6 +1425,8 @@ function placeRows(pre, title) {
 function buttonsUi() {
     return [
         roleBar('buttons'),
+        check('btnTop', 'Кнопки поверх всего (и скрытые тоже)',
+            'Выше текста, аватарки и соседних сообщений; край пузыря их не обрезает'),
         h('label.vte-tb-check', { title: 'Только на время настройки — в тему не пишется' }, [
             h('input', { type: 'checkbox', checked: hiddenShown, on: { change: (e) => showHidden(e.target.checked) } }),
             h('span', { text: 'Показать скрытые кнопки (после «…» и правки)' }),
@@ -1258,9 +1554,24 @@ async function openGlyphPicker(cls, label) {
         [h('option', { value: '-1', text: 'Все разделы' }), ...icons.cats.map((c, i) => h('option', { value: String(i), text: c.label }))]);
     const faPane = h('div.vte-tb-pane', {}, [h('div.vte-tb-pop-tools', {}, [search, cats, count]), grid]);
 
-    const url = h('input.vte-input', { type: 'text', spellcheck: false, placeholder: 'https://… ссылка на .svg / .png / .webp' });
+    // Уже стоит картинка (наша или темы) — сразу показываем её ссылку или код
+    let nowImg = state.glyphs[cls]?.img || '';
+    if (!nowImg) {
+        try {
+            const el = document.querySelector(`#chat .mes .${cls}`);
+            const m = el && getComputedStyle(el, '::before').backgroundImage.match(/url\(\s*"?([^")]*)"?\s*\)/);
+            if (m) nowImg = m[1];
+        } catch {}
+    }
+    const was = tb.imageFields ? tb.imageFields(nowImg) : { url: nowImg, code: '' };
+    const url = h('input.vte-input', { type: 'text', spellcheck: false, placeholder: 'https://… ссылка на .svg / .png / .webp', value: was.url });
     const code = h('textarea.vte-input.vte-tb-svg', { spellcheck: false, placeholder: 'или вставьте код <svg>…</svg>', rows: 4 });
-    const imgPane = h('div.vte-tb-pane.vte-tb-imgpane', { style: 'display:none' }, [
+    code.value = was.code;
+    // Что-то одно: ссылка или код — чтобы не гадать, что применится
+    url.addEventListener('input', () => { if (url.value.trim()) code.value = ''; });
+    code.addEventListener('input', () => { if (code.value.trim()) url.value = ''; });
+    const imgPane = h('div.vte-tb-pane.vte-tb-imgpane', { style: nowImg ? '' : 'display:none' }, [
+        nowImg ? h('div.vte-note', { text: 'Сейчас стоит эта картинка — можно поправить или вставить другую.' }) : null,
         url, code,
         h('button.vte-btn.vte-btn-primary', {
             type: 'button',
@@ -1292,15 +1603,17 @@ async function openGlyphPicker(cls, label) {
         },
     }, [h('span', { text })]);
     const tabFa = tab('Font Awesome', 'fa');
-    tabFa.classList.add('active');
+    const tabImg = tab('Ссылка / SVG', 'img');
+    (nowImg ? tabImg : tabFa).classList.add('active');
+    if (nowImg) faPane.style.display = 'none';
     glyphPop = h('div.vte-tb-pop', {}, [
         h('div.vte-tb-pop-head', {}, [h('span', { text: `Значок: ${label}` }), iconBtn('fa-xmark', 'Закрыть', closeGlyphPicker, 'vte-tb-mini')]),
-        h('div.vte-tb-tabs', {}, [tabFa, tab('Ссылка / SVG', 'img')]),
+        h('div.vte-tb-tabs', {}, [tabFa, tabImg]),
         faPane, imgPane,
     ]);
     panel.appendChild(glyphPop);
     run();
-    setTimeout(() => search.focus(), 0);
+    if (!nowImg) setTimeout(() => search.focus(), 0);
 }
 
 /** SVG-код → компактная data-ссылка, без скриптов */
@@ -1465,6 +1778,122 @@ async function anchorBadges() {
 
 const magnet = (text, fn, hint) => h('button.vte-btn.vte-bb-magnet', { type: 'button', title: hint, on: { click: fn } },
     [icon('fa-magnet'), h('span', { text: ` ${text}` })]);
+
+/* ============================================================
+   ДЕКОР ПО БОКАМ ЧАТА — интерфейс
+============================================================ */
+function decorUrl(key) {
+    const input = h('input.vte-input.vte-tb-url', {
+        type: 'text', spellcheck: false, placeholder: 'https://… ссылка на картинку', value: val(key) || '',
+        on: {
+            change: (e) => {
+                const v = e.target.value.trim();
+                if (v && !/^https?:\/\/[^\s"'()<>\\]+$/i.test(v) && !/^data:image\//i.test(v)) {
+                    say('Нужна ссылка http(s)://');
+                    e.target.value = val(key) || '';
+                    return;
+                }
+                setVal(key, v);
+                commit();
+                render();
+            },
+        },
+    });
+    return input;
+}
+
+function decorSide(side, title) {
+    const k = (x) => `d${side}${x}`;
+    const on = !!val(k('img'));
+    return [
+        h('div.vte-bb-shared', { text: title }),
+        row('Картинка', decorUrl(k('img')), 'Пока только ссылкой. Как фон — работает с любого сайта'),
+        on ? row('Ширина', slider(k('w'), 1, 150, 'vw', '—', 'Доля ширины окна браузера: не меняется при масштабе', 0.5)) : null,
+        on ? row('Высота', slider(k('h'), 1, 150, 'vw', '—', '', 0.5)) : null,
+        on ? row('Вбок', slider(k('x'), -80, 80, 'vw', 'у края', side === 'L' ? 'Минус — наружу, за левый край чата' : 'Плюс — наружу, за правый край чата', 0.5)) : null,
+        on ? row('Вверх-вниз', slider(k('y'), -40, 120, 'vw', 'посередине полосы', 'От середины полосы со значками. Плюс — ниже', 0.5)) : null,
+        on ? row('Непрозрачность', slider(k('op'), 5, 100, '%', '100%')) : null,
+        on ? check(k('flip'), 'Отразить по горизонтали') : null,
+        on ? check(k('front'), 'Поверх открытых панелей',
+            'Обычно декор лежит над чатом, но под открытыми панелями ST — чтобы их не загораживать') : null,
+    ];
+}
+
+function scrollUi() {
+    const hideAll = val('sbHide') === 'both';
+    const styleOk = !hideAll && val('sbWhere') !== val('sbHide');
+    const urlInput = h('input.vte-input.vte-tb-url', {
+        type: 'text', spellcheck: false, placeholder: 'https://… картинка ползунка (png)', value: val('sbImg') || '',
+        on: {
+            change: (e) => {
+                const v = e.target.value.trim();
+                if (v && !/^https?:\/\/[^\s"'()<>\\]+$/i.test(v) && !/^data:image\//i.test(v)) { say('Нужна ссылка http(s)://'); e.target.value = val('sbImg') || ''; return; }
+                setVal('sbImg', v);
+                commit();
+                render();
+            },
+        },
+    });
+    return [
+        row('Какая', select('sbScope', [['chat', 'только в чате'], ['all', 'во всём интерфейсе']], render)),
+        row('Спрятать', select('sbHide', [['', 'нет'], ['phone', 'на телефоне'], ['pc', 'на ПК'], ['both', 'везде']], render),
+            'Полосы не видно, а листать можно как раньше — колёсиком или пальцем'),
+        h('small.vte-note', { text: 'Телефон — сенсорный экран без мыши, ПК — с мышью. Узкое окно браузера на ПК остаётся ПК.' }),
+        hideAll ? null : row('Менять вид', select('sbWhere', [['both', 'везде'], ['pc', 'только на ПК'], ['phone', 'только на телефоне']], render)),
+        !hideAll && !styleOk ? h('small.vte-note', { text: 'Там полоса спрятана — менять нечего. Выберите другое место.' }) : null,
+        styleOk ? row('Толщина', slider('sbW', 0, 24, 'px', 'как в теме')) : null,
+        styleOk && !val('sbImg') ? row('Ползунок', colorBtn('sbThumb', 'как в теме')) : null,
+        styleOk ? row('Дорожка', colorBtn('sbTrack', 'как в теме')) : null,
+        styleOk ? row('Скругление', slider('sbRadius', 0, 20, 'px', 'как в теме')) : null,
+        styleOk ? row('Своя картинка', urlInput, 'PNG ссылкой — встаёт на ползунок вместо цвета') : null,
+        styleOk && val('sbImg') ? row('Как вписать', select('sbFit', [['stretch', 'растянуть по ползунку'], ['contain', 'целиком, без искажений']])) : null,
+        styleOk ? h('small.vte-note', { text: 'Картинка и скругление видны в Chrome, Edge, Opera, Яндекс и на Android. Firefox умеет только цвета.' }) : null,
+    ];
+}
+
+function decorUi() {
+    return [
+        h('small.vte-note', {
+            text: 'Картинки держатся за левый и правый край чата. Меняешь ширину чата в таверне — едут вместе с ним; '
+                + 'при масштабе браузера (Ctrl +/−) не меняются. Начальное положение — как в примере темы.',
+        }),
+        ...decorSide('L', 'Слева'),
+        ...decorSide('R', 'Справа'),
+    ];
+}
+
+/* Готовое сообщение со всеми видами разметки — вставить в чат и смотреть.
+   Подчёркнутый в ST — __текст__ (включено в самой таверне) */
+const PANGRAM = 'Съешь же ещё этих мягких французских булок, да выпей чаю.';
+const MARKDOWN_SAMPLE = [
+    PANGRAM,
+    `*${PANGRAM}*`,
+    `**${PANGRAM}**`,
+    `"${PANGRAM}"`,
+    `"*${PANGRAM}* — внутри кавычек."`,
+    `__${PANGRAM}__`,
+    `> ${PANGRAM}`,
+    '',
+    '---',
+    '',
+    PANGRAM,
+].join('\n');
+
+async function copyMarkdown() {
+    let ok = false;
+    try { await navigator.clipboard.writeText(MARKDOWN_SAMPLE); ok = true; } catch {}
+    if (!ok) {
+        // Запасной путь — если браузер не дал доступ к буферу
+        const ta = document.createElement('textarea');
+        ta.value = MARKDOWN_SAMPLE;
+        ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+        document.body.appendChild(ta);
+        ta.select();
+        try { ok = document.execCommand('copy'); } catch {}
+        ta.remove();
+    }
+    say(ok ? 'Скопировано — вставьте в поле ввода и отправьте, чтобы увидеть все виды разметки' : 'Не удалось скопировать');
+}
 
 let themeOpen = false;
 function themeSection() {

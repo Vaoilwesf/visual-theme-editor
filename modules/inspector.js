@@ -15,6 +15,8 @@ let onPickAgain = null;
 let onUndo = null;
 let onRedo = null;
 let onOpenTemplates = null;
+let onToggleCode = null;
+let isCodeOpen = null;
 let onDone = null;
 let picker = null;
 // Лёгкий режим: не предлагать размытие и градиенты, тени — до 10px
@@ -107,10 +109,10 @@ function applyGeometry() {
     if (!panel || window.innerWidth <= 768) return;
 
     if (ui.width) panel.style.width = `${Math.max(280, ui.width)}px`;
-    if (ui.height) {
-        panel.style.height = `${Math.max(220, ui.height)}px`;
-        panel.style.maxHeight = 'none';
-    }
+    /* Высота — по содержимому: без выбранного элемента окно короткое, без
+       пустого места под кнопками. Ручка в углу задаёт наибольшую высоту */
+    panel.style.height = 'auto';
+    if (ui.height) panel.style.maxHeight = `${Math.max(220, ui.height)}px`;
     if (ui.left != null && ui.top != null) {
         panel.style.right = 'auto';
         panel.style.left = `${Math.min(Math.max(0, ui.left), window.innerWidth - 120)}px`;
@@ -124,7 +126,7 @@ function rememberGeometry() {
     ui.left = Math.round(r.left);
     ui.top = Math.round(r.top);
     ui.width = Math.round(r.width);
-    if (!panel.classList.contains('vte-collapsed')) ui.height = Math.round(r.height);
+    // Высоту не запоминаем по факту (она по содержимому) — её задаёт только ручка
     saveUi();
 }
 
@@ -153,7 +155,7 @@ function makeResizable(box) {
         box.style.left = `${r.left}px`;
         box.style.top = `${r.top}px`;
         box.style.right = 'auto';
-        box.style.maxHeight = 'none';
+        box.style.height = 'auto';
         grip.setPointerCapture(e.pointerId);
         e.preventDefault();
         e.stopPropagation();
@@ -162,12 +164,14 @@ function makeResizable(box) {
     grip.addEventListener('pointermove', (e) => {
         if (!on) return;
         box.style.width = `${Math.max(280, sw + e.clientX - sx)}px`;
-        box.style.height = `${Math.max(220, sh + e.clientY - sy)}px`;
+        // Тянем наибольшую высоту: окно короче, если содержимого меньше
+        box.style.maxHeight = `${Math.max(220, sh + e.clientY - sy)}px`;
     });
 
     const stop = () => {
         if (!on) return;
         on = false;
+        ui.height = Math.round(parseFloat(box.style.maxHeight) || box.getBoundingClientRect().height);
         rememberGeometry();
     };
     grip.addEventListener('pointerup', stop);
@@ -256,6 +260,7 @@ function iconBtn(faName, title, onClick, extraClass) {
 ============================================================ */
 /** Подсветить включённые инструменты */
 export function refreshTools() {
+    syncCodeBtn();
     if (!els.tools) return;
     for (const btn of els.tools.children) {
         const t = tools.find(x => x.id === btn.dataset.tool);
@@ -275,6 +280,8 @@ export function init(options = {}) {
     onUndo = options.onUndo || (() => {});
     onRedo = options.onRedo || (() => {});
     onOpenTemplates = options.onOpenTemplates || null;
+    onToggleCode = options.onToggleCode || null;
+    isCodeOpen = options.isCodeOpen || null;
     onDone = options.onDone || null;
     onTextApply = options.onTextApply || null;
     picker = options.picker || null;
@@ -417,8 +424,8 @@ export function createPanel() {
         h('div.vte-header-btns', {}, [
             els.zoomBox,
             h('span.vte-header-sep'),
-            onOpenTemplates
-                ? iconBtn('fa-layer-group', 'Шаблоны групп элементов', () => onOpenTemplates())
+            onToggleCode
+                ? (els.codeBtn = iconBtn('fa-code', 'Открыть или закрыть панель кода', () => { onToggleCode(); syncCodeBtn(); }))
                 : null,
             iconBtn('fa-crosshairs', 'Выбрать другой элемент', () => onPickAgain()),
             iconBtn('fa-rotate-left', 'Отменить (Ctrl+Z)', () => onUndo()),
@@ -581,6 +588,11 @@ export function createPanel() {
     applyGeometry();
 
     return panel;
+}
+
+/** Кнопка кода в шапке — подсвечена, пока панель кода открыта */
+function syncCodeBtn() {
+    try { els.codeBtn?.classList.toggle('active', !!isCodeOpen?.()); } catch {}
 }
 
 export function hidePanel() {

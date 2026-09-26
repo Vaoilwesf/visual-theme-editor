@@ -471,8 +471,8 @@ const vteHighlight = CM.HighlightStyle.define([
 export const CODE_THEMES = [
     { id: 'default', name: 'Стандартная', hint: 'Тёмно-синяя, как у остальных панелей' },
     { id: 'adaptive', name: 'Под тему таверны', hint: 'Цвета берутся из текущей темы SillyTavern' },
-    { id: 'rose', name: 'Пепельная роза ♡', hint: 'Серая с розовым текстом, мягкими углами и значками-сердечками' },
-    { id: 'moon', name: 'Лунный сон ☾', hint: 'Серо-синяя (Paynes Grey) с жемчужным текстом, луной и звёздами' },
+    { id: 'rose', name: 'Пепельная роза', hint: 'Серая с розовым текстом, мягкими углами и значками-сердечками' },
+    { id: 'moon', name: 'Лунный сон', hint: 'Серо-синяя (Paynes Grey) с жемчужным текстом, луной и звёздами' },
 ];
 
 /* Стандартная: те же цвета, что были всегда */
@@ -784,7 +784,7 @@ let themeObserver = null;
 let themeTimer = null;
 
 /* Все панели редактора, которые красит тема */
-const THEMED_PANELS = '#vte-code-panel, #vte-inspector-panel, #vte-templates-panel, #vte-colorpicker, #vte-topbar-panel, #vte-fonts-panel, #vte-headers-panel, #vte-avatars-panel, #vte-bubbles-panel, #vte-gallery-panel, #vte-confirm';
+const THEMED_PANELS = '#vte-code-panel, #vte-inspector-panel, #vte-templates-panel, #vte-colorpicker, #vte-topbar-panel, #vte-fonts-panel, #vte-headers-panel, #vte-avatars-panel, #vte-bubbles-panel, #vte-bottom-panel, #vte-gallery-panel, #vte-float-btn, #vte-confirm';
 let themeStyle = null;
 
 /**
@@ -1843,7 +1843,7 @@ export function createPanel() {
         iconBtn('fa-indent', 'Форматировать (Shift+Alt+F)', format),
         wrapBtn,
         iconBtn('fa-palette', 'Тема панели кода', (e) => toggleThemeMenu(e.currentTarget), 'vte-code-theme-btn'),
-        onOpenEditor ? iconBtn('fa-wand-magic-sparkles', 'Открыть окно редактора', () => onOpenEditor()) : null,
+        onOpenEditor ? iconBtn('fa-wand-magic-sparkles', 'Открыть или закрыть окно редактора', () => onOpenEditor()) : null,
         iconBtn('fa-copy', 'Скопировать всё', copyAll),
         iconBtn('fa-window-minimize', 'Свернуть', toggleCollapse),
         iconBtn('fa-xmark', 'Закрыть', hidePanel, 'vte-code-btn-close'),
