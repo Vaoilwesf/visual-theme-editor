@@ -24,10 +24,14 @@
 //    расширение. Маску не используем: картинку с чужого сайта браузер
 //    для маски не загрузит (нужно разрешение CORS), и значок пропадает.
 
+import { ruleRows } from './ruleList.js';
+
 let onApply = null;       // (rules) => записать в тему одним шагом истории
 let onReadRules = null;   // () => Map(селектор -> Map(свойство -> значение))
 let onThemeRules = null;  // () => правила самой темы, которые трогают топ-бар
-let onReveal = null;      // (from, to) => показать место в панели кода
+let onReveal = null;
+let onDeleteRule = null;       // (from, to) => убрать правило из кода
+let onCleanOverridden = null;  // (starts) => убрать перекрытое      // (from, to) => показать место в панели кода
 let onIconRules = null;   // (элемент) => [{ from, to }] — места темы про этот значок
 let onRevealMany = null;  // (список) => подсветить все эти места в коде
 let onToast = null;
@@ -82,6 +86,8 @@ export function init(options = {}) {
     onReadRules = options.onReadRules || null;
     onThemeRules = options.onThemeRules || null;
     onReveal = options.onReveal || null;
+    onDeleteRule = options.onDeleteRule || null;
+    onCleanOverridden = options.onCleanOverridden || null;
     onIconRules = options.onIconRules || null;
     onRevealMany = options.onRevealMany || null;
     onToast = options.onToast || (() => {});
@@ -741,16 +747,10 @@ function themeSection() {
         h('span', { text: ` Уже в теме: ${list.length} ${list.length === 1 ? 'правило' : 'правил'} для топ-бара` })]));
 
     if (themeOpen) {
-        for (const r of list) {
-            box.appendChild(h('button.vte-tb-rule', {
-                type: 'button',
-                title: 'Показать в коде',
-                on: { click: () => onReveal?.(r.from, r.to) },
-            }, [
-                h('code.vte-tb-rule-sel', { text: r.selector }),
-                h('span.vte-tb-rule-props', { text: r.props }),
-            ]));
-        }
+        box.append(...ruleRows(list, {
+            h, icon, onReveal, onDeleteRule, onCleanOverridden,
+            say: (t) => onToast?.(t),
+        }));
         box.appendChild(h('div.vte-note', {
             text: 'Если меняешь то, что тема уже задала, редактор спросит: заменить прямо '
                 + 'в теме (старая строка удалится) или добавить поверх в «Мои правки».',

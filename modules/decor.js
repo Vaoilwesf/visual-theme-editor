@@ -18,9 +18,14 @@
 // слой fixed и не зависит от чата. Рамки с ручками на странице — только
 // пока окно открыто, в тему не пишутся.
 
+import { ruleRows } from './ruleList.js';
+
 let onApply = null;
 let onReadRules = null;
 let onReveal = null;
+let onDeleteRule = null;
+let onCleanOverridden = null;
+let onRulesMatching = null;
 let onToast = null;
 let picker = null;
 let onSnapshot = null;
@@ -37,6 +42,9 @@ export function init(options = {}) {
     onApply = options.onApply || null;
     onReadRules = options.onReadRules || null;
     onReveal = options.onReveal || null;
+    onDeleteRule = options.onDeleteRule || null;
+    onCleanOverridden = options.onCleanOverridden || null;
+    onRulesMatching = options.onRulesMatching || null;
     onToast = options.onToast || (() => {});
     picker = options.picker || null;
     onSnapshot = options.onSnapshot || null;
@@ -466,6 +474,7 @@ function removeItem(it) {
 function screen() {
     const it = cur();
     return [
+        themeSection(),
         group('items', 'Картинки поверх таверны', [
             h('small.vte-note', {
                 text: 'Картинки и значки поверх всей таверны: на ПК и на телефоне. Нажимать на то, что под ними, они не мешают. '
@@ -516,6 +525,23 @@ function screen() {
         ]),
         h('small.vte-note.vte-foot-note', { text: '«Как было до открытия» — отменить всё, что сделано с момента открытия окна. «Сбросить все настройки окна» — убрать всё, что это окно когда-либо записало в тему: останется оформление самой темы.' }),
     ];
+}
+
+/* ---------- что про декор уже есть в коде ---------- */
+let themeOpen = false;
+const DECOR_TEST = (sel) => /^(html|body|#movingDivs|#top-settings-holder)::(before|after)$/.test(sel);
+
+function themeSection() {
+    const list = onRulesMatching?.(DECOR_TEST) || [];
+    if (!list.length) return null;
+    const box = h('div.vte-tb-section.vte-tb-theme');
+    box.appendChild(h('button.vte-tb-ext-toggle', {
+        type: 'button',
+        on: { click: () => { themeOpen = !themeOpen; render(); } },
+    }, [icon(themeOpen ? 'fa-chevron-up' : 'fa-chevron-down'),
+        h('span', { text: ` Уже есть про декор: ${list.length}` })]));
+    if (themeOpen) box.append(...ruleRows(list, { h, icon, onReveal, onDeleteRule, onCleanOverridden, say }));
+    return box;
 }
 
 /* ---------- декор по бокам чата ---------- */

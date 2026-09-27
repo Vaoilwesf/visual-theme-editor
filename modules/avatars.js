@@ -20,10 +20,14 @@
 //  - аватарка остаётся в потоке (не абсолютная): бейджи под ней не уезжают,
 //    а высота сообщения считается сама.
 
+import { ruleRows } from './ruleList.js';
+
 let onApply = null;
 let onReadRules = null;
 let onThemeRules = null;
 let onReveal = null;
+let onDeleteRule = null;       // (from, to) => убрать правило из кода
+let onCleanOverridden = null;  // (starts) => убрать перекрытое
 let onToast = null;
 let picker = null;
 let onSnapshot = null;   // запомнить тему на момент открытия окна
@@ -142,6 +146,8 @@ export function init(options = {}) {
     onReadRules = options.onReadRules || null;
     onThemeRules = options.onThemeRules || null;
     onReveal = options.onReveal || null;
+    onDeleteRule = options.onDeleteRule || null;
+    onCleanOverridden = options.onCleanOverridden || null;
     onToast = options.onToast || (() => {});
     picker = options.picker || null;
     onSnapshot = options.onSnapshot || null;
@@ -1351,12 +1357,10 @@ function themeSection() {
     }, [icon(themeOpen ? 'fa-chevron-up' : 'fa-chevron-down'),
         h('span', { text: ` Уже в теме: ${list.length} ${list.length === 1 ? 'правило' : 'правил'} про сообщения` })]));
     if (themeOpen) {
-        for (const r of list) {
-            box.appendChild(h('button.vte-tb-rule', {
-                type: 'button', title: 'Показать в коде',
-                on: { click: () => onReveal?.(r.from, r.to) },
-            }, [h('code.vte-tb-rule-sel', { text: r.selector }), h('span.vte-tb-rule-props', { text: r.props })]));
-        }
+        box.append(...ruleRows(list, {
+            h, icon, onReveal, onDeleteRule, onCleanOverridden,
+            say: (t) => onToast?.(t),
+        }));
     }
     return box;
 }

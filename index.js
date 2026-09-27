@@ -136,7 +136,8 @@ function restoreFor(id) {
 /** Окна инструментов читают CSS при открытии — после правок обновляем их */
 function refreshTools() {
     for (const tool of [topbar, headers, avatars, gallery, bubbles, bottombar, panels, decor]) {
-        try { if (tool?.isOpen?.()) tool.refresh?.(); } catch {}
+        // у «Пузырей» есть второе окно — «Markdown»
+        try { if (tool?.isOpen?.() || tool?.isMarkdownOpen?.()) tool.refresh?.(); } catch {}
     }
     try { if (fontsPanel && fontsPanel.style.display !== 'none') renderFontsTheme(); } catch {}
     inspector.refreshTools?.();
@@ -1103,9 +1104,286 @@ function themeRulesForParts(parts) {
             props: rule.decls.map(d => d.prop).slice(0, 6).join(', ') + (rule.decls.length > 6 ? '…' : ''),
             from: rule.ruleStart,
             to: rule.ruleEnd,
+            ...ruleExtras(rule),
         });
     }
     return out;
+}
+
+/**
+ * Все правила (и темы, и «Моих правок»), у которых хоть один селектор
+ * подходит под test. Живые элементы не нужны: раздел видит правила про
+ * цитаты и код, даже если в открытом чате их сейчас нет
+ */
+function themeRulesMatching(test) {
+    let idx;
+    try { idx = getRuleIndex(); } catch { return []; }
+    if (!idx || typeof test !== 'function') return [];
+    const pb = perfRange();
+    const out = [];
+    for (const rule of idx.rules) {
+        if (inPerf(rule, pb)) continue;
+        let hit = false;
+        try { hit = rule.parts.some(p => test(String(p.raw).replace(/\s+/g, ' ').trim())); } catch {}
+        if (!hit) continue;
+        const sel = rule.parts.map(p => p.raw).join(', ');
+        out.push({
+            selector: sel.length > 90 ? `${sel.slice(0, 88)}…` : sel,
+            props: rule.decls.map(d => d.prop).slice(0, 6).join(', ') + (rule.decls.length > 6 ? '…' : ''),
+            from: rule.ruleStart,
+            to: rule.ruleEnd,
+            mine: !!rule.inAutoBlock,
+            start: rule.ruleStart,
+            over: (() => { const o = !rule.inAutoBlock && overriddenInfo().get(rule.ruleStart); return o ? { dead: o.dead.length, total: o.total } : null; })(),
+            parts: rule.parts.map(p => p.raw),
+            decls: rule.decls.map(d => ({ prop: d.prop, value: d.value })),
+        });
+    }
+    return out;
+}
+
+/* ============================================================
+   ПЕРЕКРЫТОЕ И «ЧТО ЗАДАНО В ТЕМЕ»
+   Перекрыто — строка темы, которая уже ничего не решает: на всех её
+   элементах то же свойство берётся из другого правила (обычно из «Моих
+   правок» с !important). Считается по живой странице: элементы, которых
+   сейчас нет (например, цитаты в пустом чате), не проверяются — такие
+   строки никогда не считаются лишними.
+============================================================ */
+/* ============================================================
+   ЧТО ВИДЯТ ОКНА ПРИ ОТКРЫТИИ
+   Раньше — только «Мои правки». Теперь ещё и правила самой темы с теми
+   же селекторами, что пишут окна: тема, сжатая в одну строку или
+   сделанная раньше без блока «Мои правки», тоже читается — окно
+   показывает её кавычки, ники и т.д., а не «как в теме». «Мои правки»
+   сильнее: где есть и то и другое, берётся своё.
+   Селекторы сравниваются в одном виде: без лишних пробелов вокруг «>», «,»
+   и скобок, без кавычек в [атрибутах] — так сжатая тема совпадает с тем,
+   как пишут окна.
+============================================================ */
+function canonSel(sel) {
+    return String(sel || '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*([>+~,])\s*/g, '$1')
+        .replace(/\(\s+/g, '(').replace(/\s+\)/g, ')')
+        .replace(/=\s*"([\w-]+)"\s*\]/g, '=$1]').replace(/=\s*'([\w-]+)'\s*\]/g, '=$1]')
+        .trim();
+}
+function canonKey(key) {
+    const i = String(key).indexOf('\u0001');
+    if (i === -1) return canonSel(key);
+    return `${String(key).slice(0, i).replace(/\s+/g, ' ').replace(/:\s*/g, ': ').trim()}\u0001${canonSel(String(key).slice(i + 1))}`;
+}
+
+/** Map, который находит правило по селектору в любой записи */
+class CanonMap extends Map {
+    get(k) { return super.get(canonKey(k)); }
+    has(k) { return super.has(canonKey(k)); }
+    set(k, v) { return super.set(canonKey(k), v); }
+}
+
+let readCache = { css: null, map: null };
+
+function readRulesForTools() {
+    const css = customCSS || readCSS();
+    if (readCache.css === css && readCache.map) return readCache.map;
+    const out = new CanonMap();
+    try {
+        const idx = getRuleIndex();
+        const pb = perfRange();
+        for (const rule of idx?.rules || []) {
+            if (rule.inAutoBlock || inPerf(rule, pb)) continue;
+            const sel = rule.parts.map(p => p.raw).join(', ');
+            const cond = (rule.conditions || []).join(' ');
+            const key = cond ? `${cond}\u0001${sel}` : sel;
+            const m = out.get(key) || new Map();
+            for (const d of rule.decls) m.set(d.prop, d.important ? `${d.value} !important` : d.value);
+            out.set(key, m);
+        }
+    } catch {}
+    // «Мои правки» — поверх
+    for (const [k, m] of generator.autoRules(css)) {
+        const prev = out.get(k);
+        out.set(k, prev ? new Map([...prev, ...m]) : m);
+    }
+    readCache = { css, map: out };
+    return out;
+}
+
+/** Что нужно спискам правил: метки, «перекрыто», свойства для подписи */
+function ruleExtras(rule) {
+    let over = null;
+    try { const o = !rule.inAutoBlock && overriddenInfo().get(rule.ruleStart); over = o ? { dead: o.dead.length, total: o.total } : null; } catch {}
+    return {
+        mine: !!rule.inAutoBlock,
+        start: rule.ruleStart,
+        over,
+        parts: rule.parts.map(p => p.raw),
+        decls: rule.decls.map(d => ({ prop: d.prop, value: d.value })),
+    };
+}
+
+let overCache = { css: null, map: null };
+
+/** Живые элементы по селектору — без скрытых шаблонов ST (#message_template и т.п.) */
+function liveEls(sel, max = 3) {
+    const out = [];
+    try {
+        for (const el of document.querySelectorAll(sel)) {
+            if (el.closest('template, [id$="_template"], [id$="-template"]')) continue;
+            out.push(el);
+            if (out.length >= max) break;
+        }
+    } catch {}
+    return out;
+}
+const themeValueCache = new Map();
+
+function overriddenInfo() {
+    const css = customCSS || readCSS();
+    if (overCache.css === css && overCache.map) return overCache.map;
+    const map = new Map();
+    let idx;
+    try { idx = getRuleIndex(); } catch { return map; }
+    if (!idx) return map;
+    const pb = perfRange();
+    const dmCache = new Map();
+    const dm = (el, ps) => {
+        let m = dmCache.get(el);
+        if (!m) { m = new Map(); dmCache.set(el, m); }
+        const k = ps || '';
+        if (!m.has(k)) m.set(k, rules.declarationMap(idx, el, ps || null, { includeAuto: true }));
+        return m.get(k);
+    };
+    // Победитель под @media / @supports — на другом экране его может не
+    // быть, и тогда строка темы снова работает. Такие строки не лишние
+    const conditional = new Set();
+    for (const r of idx.rules) {
+        if (!r.conditions?.length) continue;
+        for (const p of r.parts) for (const d of r.decls) conditional.add(`${p.raw}|${d.prop.toLowerCase()}|${d.value}`);
+    }
+    for (const rule of idx.rules) {
+        if (rule.inAutoBlock || inPerf(rule, pb)) continue;
+        try { if (!rules.isContextActive(rule)) continue; } catch { continue; }   // спящий @media — не судим
+        // У каждого селектора — до трёх живых элементов; нет элементов — не судим
+        const partEls = [];
+        let unknown = false;
+        for (const part of rule.parts) {
+            if (part.states?.length) { unknown = true; break; }
+            const els = liveEls(part.matchable, 3);
+            if (!els.length) { unknown = true; break; }
+            partEls.push([part, els]);
+        }
+        if (unknown || !partEls.length) continue;
+        const dead = [];
+        for (const d of rule.decls) {
+            const prop = d.prop.toLowerCase();
+            if (prop.startsWith('--')) continue;
+            let wins = false;
+            for (const [part, els] of partEls) {
+                for (const el of els) {
+                    const w = dm(el, part.pseudo).get(prop);
+                    if (!w || (w.selector === part.raw && w.value === d.value)
+                        || conditional.has(`${w.selector}|${prop}|${w.value}`)) { wins = true; break; }
+                }
+                if (wins) break;
+            }
+            if (!wins) dead.push(d);
+        }
+        if (dead.length) map.set(rule.ruleStart, { dead, total: rule.decls.length, rule });
+    }
+    overCache = { css, map };
+    return map;
+}
+
+/** Убрать перекрытые строки у этих правил (по ruleStart). Правило, где
+    перекрыто всё, удаляется целиком */
+function cleanOverridden(ruleStarts) {
+    const map = overriddenInfo();
+    const cuts = [];
+    for (const st of ruleStarts || []) {
+        const info = map.get(st);
+        if (!info) continue;
+        if (info.dead.length >= info.total) cuts.push({ whole: true, from: info.rule.ruleStart, to: info.rule.ruleEnd });
+        else for (const d of info.dead) cuts.push({ whole: false, decl: d });
+    }
+    if (!cuts.length) return 0;
+    let css = customCSS || readCSS();
+    // С конца — позиции впереди не сдвигаются
+    cuts.sort((a, b) => (b.whole ? b.from : b.decl.start) - (a.whole ? a.from : a.decl.start));
+    let n = 0;
+    for (const c of cuts) {
+        if (c.whole) {
+            let a = c.from, b = c.to;
+            while (a > 0 && (css[a - 1] === ' ' || css[a - 1] === '\t')) a--;
+            while (b < css.length && (css[b] === ' ' || css[b] === '\t')) b++;
+            if (css[b] === '\r') b++;
+            if (css[b] === '\n') b++;
+            css = css.slice(0, a) + css.slice(b);
+            n++;
+        } else {
+            css = rules.removeDeclaration(css, c.decl);
+            n++;
+        }
+    }
+    css = css.replace(/@(media|supports)[^{};]*\{\s*\}\s*/g, '');
+    writeCSS(css);
+    return n;
+}
+
+/**
+ * Что сейчас задаёт тема (не «Мои правки») для этого селектора и свойства:
+ * { value, from, to, selector } или null. Смотрит на первый живой элемент
+ */
+function themeValueFor(selector, prop) {
+    const css = customCSS || readCSS();
+    const ck = `${selector}|${prop}`;
+    if (themeValueCache.css !== css) { themeValueCache.clear(); themeValueCache.css = css; }
+    if (themeValueCache.has(ck)) return themeValueCache.get(ck);
+    const res = themeValueForRaw(selector, prop);
+    themeValueCache.set(ck, res);
+    return res;
+}
+
+function themeValueForRaw(selector, prop) {
+    let idx;
+    try { idx = getRuleIndex(); } catch { return null; }
+    if (!idx) return null;
+    const { base, pseudo } = rules.splitPseudo(String(selector).split(',')[0].trim());
+    const { selector: plain, states } = rules.stripStates(base);
+    if (states?.length) return null;
+    const el = liveEls(plain, 1)[0];
+    if (!el) return null;
+    const w = rules.declarationMap(idx, el, pseudo || null, { includeAuto: false }).get(String(prop).toLowerCase());
+    if (!w) return null;
+    const pb = perfRange();
+    for (const rule of idx.rules) {
+        if (rule.inAutoBlock || inPerf(rule, pb)) continue;
+        if (!rule.parts.some(p => p.raw === w.selector)) continue;
+        if (!rule.decls.some(d => d.prop.toLowerCase() === String(prop).toLowerCase() && d.value === w.value)) continue;
+        return { value: w.value, selector: w.selector, from: rule.ruleStart, to: rule.ruleEnd };
+    }
+    return null;
+}
+
+/**
+ * Удалить правило из кода целиком (от селектора до закрывающей скобки).
+ * Пустые @media / @supports, оставшиеся после этого, тоже убираются.
+ * Вернуть можно «Как было до открытия» в окне или отменой в коде.
+ */
+function deleteRuleRange(from, to) {
+    const css = customCSS || readCSS();
+    if (!(from >= 0 && to > from && to <= css.length)) return false;
+    let a = from, b = to;
+    // вместе с отступом строки и переводом строки после правила
+    while (a > 0 && (css[a - 1] === ' ' || css[a - 1] === '\t')) a--;
+    while (b < css.length && (css[b] === ' ' || css[b] === '\t')) b++;
+    if (css[b] === '\r') b++;
+    if (css[b] === '\n') b++;
+    let next = css.slice(0, a) + css.slice(b);
+    next = next.replace(/@(media|supports)[^{};]*\{\s*\}\s*/g, '');
+    writeCSS(next);
+    return true;
 }
 
 /** Правила самой темы (не «Мои правки»), которые трогают топ-бар и его значки */
@@ -1128,6 +1406,7 @@ function themeTopbarRules() {
             props: rule.decls.map(d => d.prop).slice(0, 6).join(', ') + (rule.decls.length > 6 ? '…' : ''),
             from: rule.ruleStart,
             to: rule.ruleEnd,
+            ...ruleExtras(rule),
         });
     }
     return out;
@@ -3104,10 +3383,12 @@ async function boot() {
     try { updateFloatBtn(); } catch {}
 
     gallery.init({
+        onDeleteRule: deleteRuleRange,
+        onCleanOverridden: cleanOverridden,
         onApply: applyToolRules,
         onSnapshot: () => snapshotFor('gallery'),
         onRestore: () => restoreFor('gallery'),
-        onReadRules: () => generator.autoRules(customCSS),
+        onReadRules: () => readRulesForTools(),
         onThemeRules: themeRulesForParts,
         onReveal: (from, to) => {
             if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
@@ -3118,10 +3399,12 @@ async function boot() {
     });
 
     avatars.init({
+        onDeleteRule: deleteRuleRange,
+        onCleanOverridden: cleanOverridden,
         onApply: applyToolRules,
         onSnapshot: () => snapshotFor('avatars'),
         onRestore: () => restoreFor('avatars'),
-        onReadRules: () => generator.autoRules(customCSS),
+        onReadRules: () => readRulesForTools(),
         onThemeRules: themeRulesForParts,
         onReveal: (from, to) => {
             if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
@@ -3132,10 +3415,12 @@ async function boot() {
     });
 
     bottombar.init({
+        onDeleteRule: deleteRuleRange,
+        onCleanOverridden: cleanOverridden,
         onApply: applyToolRules,
         onSnapshot: () => snapshotFor('bottombar'),
         onRestore: () => restoreFor('bottombar'),
-        onReadRules: () => generator.autoRules(customCSS),
+        onReadRules: () => readRulesForTools(),
         onThemeRules: themeRulesForParts,
         onReveal: (from, to) => {
             if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
@@ -3146,10 +3431,13 @@ async function boot() {
     });
 
     decor.init({
+        onDeleteRule: deleteRuleRange,
+        onCleanOverridden: cleanOverridden,
+        onRulesMatching: themeRulesMatching,
         onApply: applyToolRules,
         onSnapshot: () => snapshotFor('decor'),
         onRestore: () => restoreFor('decor'),
-        onReadRules: () => generator.autoRules(customCSS),
+        onReadRules: () => readRulesForTools(),
         onReveal: (from, to) => {
             if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
             setTimeout(() => editor.revealRange?.(from, to, { focus: true, hold: 4000 }), 60);
@@ -3159,10 +3447,12 @@ async function boot() {
     });
 
     panels.init({
+        onDeleteRule: deleteRuleRange,
+        onCleanOverridden: cleanOverridden,
         onApply: applyToolRules,
         onSnapshot: () => snapshotFor('panels'),
         onRestore: () => restoreFor('panels'),
-        onReadRules: () => generator.autoRules(customCSS),
+        onReadRules: () => readRulesForTools(),
         onThemeRules: themeRulesForParts,
         onReveal: (from, to) => {
             if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
@@ -3173,12 +3463,16 @@ async function boot() {
     });
 
     bubbles.init({
+        onCleanOverridden: cleanOverridden,
+        onThemeValue: themeValueFor,
+        onDeleteRule: deleteRuleRange,
+        onRulesMatching: themeRulesMatching,
         onMdSnapshot: () => snapshotFor('markdown'),
         onMdRestore: () => restoreFor('markdown'),
         onApply: applyToolRules,
         onSnapshot: () => snapshotFor('bubbles'),
         onRestore: () => restoreFor('bubbles'),
-        onReadRules: () => generator.autoRules(customCSS),
+        onReadRules: () => readRulesForTools(),
         onThemeRules: themeRulesForParts,
         onReveal: (from, to) => {
             if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
@@ -3189,10 +3483,12 @@ async function boot() {
     });
 
     headers.init({
+        onDeleteRule: deleteRuleRange,
+        onCleanOverridden: cleanOverridden,
         onApply: applyToolRules,
         onSnapshot: () => snapshotFor('headers'),
         onRestore: () => restoreFor('headers'),
-        onReadRules: () => generator.autoRules(customCSS),
+        onReadRules: () => readRulesForTools(),
         onThemeRules: themeRulesForParts,
         onReveal: (from, to) => {
             if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
@@ -3203,6 +3499,8 @@ async function boot() {
     });
 
     topbar.init({
+        onDeleteRule: deleteRuleRange,
+        onCleanOverridden: cleanOverridden,
         onApply: applyToolRules,
         onSnapshot: () => snapshotFor('topbar'),
         onRestore: () => restoreFor('topbar'),
@@ -3216,7 +3514,7 @@ async function boot() {
             if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
             setTimeout(() => editor.revealRange?.(from, to, { focus: true, hold: 4000 }), 60);
         },
-        onReadRules: () => generator.autoRules(customCSS),
+        onReadRules: () => readRulesForTools(),
         onToast: (t) => toast(t),
         picker,
     });

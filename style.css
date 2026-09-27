@@ -467,3 +467,18 @@ html[data-vte-theme=moon] :is(#vte-inspector-panel,#vte-templates-panel,#vte-top
 .vte-dc-h-rot{left:50%;top:-30px;margin-left:-8px;cursor:grab}
 .vte-dc-h-rot::after{content:'';position:absolute;left:50%;top:14px;width:1px;height:14px;background:#4ea1ff}
 @media (hover:none) and (pointer:coarse){.vte-dc-h{width:26px;height:26px}.vte-dc-h-scale{right:-14px;bottom:-14px}.vte-dc-h-rot{top:-40px;margin-left:-13px}.vte-dc-h-rot::after{top:24px}}
+/* «Уже есть» у каждого раздела */
+.vte-grp-rules{margin-bottom:4px}
+.vte-grp-rule-tag{flex:0 0 auto;font-size:calc(9px * var(--vte-k,1));padding:1px 5px;border-radius:4px;background:var(--vte-bg-raised);color:var(--vte-fg-dim);margin-right:6px}
+.vte-grp-rule-tag.mine{background:var(--vte-accent-soft);color:var(--vte-accent)}
+.vte-grp-rule{display:flex;align-items:stretch;gap:4px}
+.vte-grp-rule>.vte-tb-rule{flex:1 1 auto;min-width:0}
+.vte-grp-rule-del{flex:0 0 auto;align-self:center}
+.vte-grp-rule-del.armed{color:#fff!important;background:#c0392b!important;border-color:#c0392b!important}
+.vte-grp-rule-what{display:block;font-size:calc(11px * var(--vte-k,1));color:var(--vte-fg);margin:2px 0;line-height:1.35}
+.vte-theme-hint{display:block;font-size:calc(9.5px * var(--vte-k,1));color:var(--vte-accent);opacity:.85;cursor:pointer;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.vte-theme-hint:hover{opacity:1;text-decoration:underline}
+.vte-tb-check .vte-theme-hint{display:inline;margin-left:6px}
+.vte-grp-rule-tag.over{background:rgba(231,120,80,.18);color:#e8906a}
+.vte-grp-clean{align-self:flex-start;margin:2px 0 4px;padding:4px 10px!important}
+.vte-grp-clean.armed{background:#c0392b!important;color:#fff!important;border-color:#c0392b!important}

@@ -25,6 +25,8 @@
 // и т.д.) на уровне сообщения: курсив внутри кавычек, рассуждения и прочие
 // тонкости ST продолжает делать сама.
 
+import { explainRule } from './ruleExplain.js';
+
 let onApply = null;
 let onReadRules = null;
 let onThemeRules = null;
@@ -33,6 +35,10 @@ let onToast = null;
 let picker = null;
 let onSnapshot = null;
 let onRestore = null;
+let onRulesMatching = null;
+let onDeleteRule = null;
+let onCleanOverridden = null; // (ruleStarts) => убрать перекрытое, вернёт сколько
+let onThemeValue = null;      // (selector, prop) => { value, from, to } что задаёт тема      // (from, to) => убрать правило из кода   // (test) => правила темы и «Моих правок» по селектору
 let onMdSnapshot = null;   // окно «Markdown» — свой снимок «как было до открытия»
 let onMdRestore = null;
 
@@ -171,6 +177,10 @@ export function init(options = {}) {
     onSnapshot = options.onSnapshot || null;
     onRestore = options.onRestore || null;
     onMdSnapshot = options.onMdSnapshot || null;
+    onRulesMatching = options.onRulesMatching || null;
+    onDeleteRule = options.onDeleteRule || null;
+    onCleanOverridden = options.onCleanOverridden || null;
+    onThemeValue = options.onThemeValue || null;
     onMdRestore = options.onMdRestore || null;
 }
 
@@ -1444,7 +1454,68 @@ function build() {
 
 /* ---------- элементы управления ---------- */
 function row(label, control, hint) {
-    return h('div.vte-tb-row', { title: hint || '' }, [h('span.vte-tb-label', { text: label }), control]);
+    const key = control?.dataset?.key || control?.querySelector?.('[data-key]')?.dataset.key;
+    const th = key ? themeHint(key) : null;
+    return h('div.vte-tb-row', { title: hint || '' }, [
+        h('span.vte-tb-label', {}, [label, th]),
+        control,
+    ]);
+}
+
+/* ============================================================
+   «В ТЕМЕ: …» — что задаёт тема для этой настройки
+   Пока настройка «как в теме», под её названием видно, что именно тема
+   там ставит. Какие строки CSS пишет настройка, окно узнаёт само: пробует
+   поменять её на время и смотрит, что изменилось в правилах (без записи)
+============================================================ */
+const probeCache = new Map();
+
+function probeValue(key, cur) {
+    const d = (GROUP_OF[key] ? roleDefaults() : defaults())[key];
+    if (typeof d === 'boolean') return !d;
+    if (typeof d === 'number') return d === 7 ? 9 : 7;
+    return '#010203';
+}
+
+function pairsFor(key) {
+    const ck = `${key}|${state.role}|${state.target}|${JSON.stringify(state.link)}`;
+    if (probeCache.has(ck)) return probeCache.get(ck);
+    let out = [];
+    try {
+        const saved = state;
+        const copy = JSON.parse(JSON.stringify(saved));
+        const a = buildRules(saved);
+        let b;
+        state = copy;
+        try { setVal(key, probeValue(key)); b = buildRules(copy); } finally { state = saved; }
+        for (const sel of new Set([...Object.keys(a), ...Object.keys(b)])) {
+            for (const prop of new Set([...Object.keys(a[sel] || {}), ...Object.keys(b[sel] || {})])) {
+                if (prop.startsWith('--vte')) continue;
+                if ((a[sel]?.[prop] || '') !== (b[sel]?.[prop] || '')) out.push([sel, prop]);
+            }
+        }
+    } catch {}
+    out = out.slice(0, 6);
+    probeCache.set(ck, out);
+    return out;
+}
+
+function themeHint(key) {
+    if (!onThemeValue) return null;
+    const d = (GROUP_OF[key] ? roleDefaults() : defaults())[key];
+    const v = val(key);
+    if (v !== d && !(v === '' && d === '') && !(v === 0 && !d)) return null;   // своё задано — подсказка не нужна
+    for (const [sel, prop] of pairsFor(key)) {
+        let t = null;
+        try { t = onThemeValue(sel, prop); } catch {}
+        if (!t) continue;
+        const short = t.value.length > 22 ? `${t.value.slice(0, 20)}…` : t.value;
+        return h('span.vte-theme-hint', {
+            title: `Задано в теме: ${t.selector} { ${prop}: ${t.value} } — нажмите, чтобы увидеть в коде`,
+            on: { click: (e) => { e.preventDefault(); e.stopPropagation(); onReveal?.(t.from, t.to); } },
+        }, [`в теме: ${short}`]);
+    }
+    return null;
 }
 
 function slider(key, min, max, unit, zeroText, hint, step = 1) {
@@ -1471,7 +1542,7 @@ function slider(key, min, max, unit, zeroText, hint, step = 1) {
     const sync = () => reset.classList.toggle('vte-tb-reset-off', ((val(key) || 0)) === def);
     input.addEventListener('input', sync);
     sync();
-    return h('span.vte-tb-slider', {}, [input, out, reset]);
+    return h('span.vte-tb-slider', { dataset: { key } }, [input, out, reset]);
 }
 
 /** Пара «телефон / ПК» со связкой */
@@ -1539,7 +1610,7 @@ function pair(title, aKey, bKey, max, hint, min = 0, zeroText = 'как в те�
     B.input.addEventListener('input', syncBoth);
     syncBoth();
     return h('div.vte-tb-sizes', { title: hint || '' }, [
-        h('div.vte-tb-sizes-head', {}, [h('span.vte-tb-label', { text: title }), link, resetBoth]),
+        h('div.vte-tb-sizes-head', {}, [h('span.vte-tb-label', {}, [title, themeHint(aKey)]), link, resetBoth]),
         A.row, B.row,
     ]);
 }
@@ -1570,7 +1641,7 @@ function colorBtn(key, emptyText) {
     }, [sw, txt]);
     const reset = iconBtn('fa-rotate-left', 'Убрать', () => { setVal(key, ''); paint(); commit(); render(); }, 'vte-tb-mini');
     paint();
-    return h('span.vte-tb-colorwrap', {}, [btn, reset]);
+    return h('span.vte-tb-colorwrap', { dataset: { key } }, [btn, reset]);
 }
 
 function check(key, label, hint) {
@@ -1578,7 +1649,7 @@ function check(key, label, hint) {
         type: 'checkbox', checked: !!val(key),
         on: { change: (e) => { setVal(key, e.target.checked); commit(); render(); } },
     });
-    return h('label.vte-tb-check', { title: hint || '' }, [input, h('span', { text: label })]);
+    return h('label.vte-tb-check', { title: hint || '' }, [input, h('span', { text: label }), themeHint(key)]);
 }
 
 function select(key, options, after) {
@@ -1586,6 +1657,7 @@ function select(key, options, after) {
         on: { change: (e) => { setVal(key, e.target.value); commit(); (after || (() => {}))(); } },
     }, options.map(([v, t]) => h('option', { value: v, text: t })));
     sel.value = val(key);
+    sel.dataset.key = key;
     return sel;
 }
 
@@ -1625,8 +1697,119 @@ function chatBgUi() {
     ];
 }
 
+/* ============================================================
+   «УЖЕ ЕСТЬ В ТЕМЕ» — у каждого раздела
+   Какие правила про этот раздел уже есть: в самой теме и в «Моих
+   правках». Ищется по селекторам, живые элементы не нужны — раздел
+   видит правила про цитаты и код, даже если в чате их сейчас нет.
+   Проверка — по последнему звену селектора (то, что он красит)
+============================================================ */
+const TAIL = (re) => (sel) => re.test(sel.split(/\s*[>+~]\s*|\s+/).pop() || '');
+const MD_TAGS = /^(q|em|i|strong|b|u|s|del|blockquote|code|pre|hr|h[1-6]|ul|ol|li|table|th|td|a)\b/i;
+const GROUP_MATCH = {
+    textall: (s) => /\.mes_text\b/.test(s) && TAIL(/^(\.mes_text|p)\b/)(s),
+    colors: (s) => /\.mes_text\b/.test(s) && TAIL(MD_TAGS)(s),
+    bubble: (s) => TAIL(/^(\.mes(\[[^\]]*\]|\.[\w-]+|:[\w-]+(\([^)]*\))?)*|\.mes_block)(::?[\w-]+)?$/)(s),
+    text: (s) => /\.mes_text\b/.test(s) && TAIL(/^\.mes_text\b/)(s),
+    names: TAIL(/\.(ch_name|name_text|timestamp|alignItemsBaseline)\b/),
+    buttons: (s) => /\.(mes_buttons|mes_button|mes_edit_buttons|extraMesButtons|extraMesButtonsHint|mes_edit)\b/.test(s),
+    chatbg: (s) => /^#chat(::?[\w-]+)?$|^#sheld(::?[\w-]+)?$/.test(s),
+    scroll: (s) => /#chat\b.*scrollbar|^#chat$/.test(s) && /scrollbar/.test(s),
+    badges: (s) => /\.(mesIDDisplay|mes_timer|tokenCounterDisplay)\b/.test(s),
+};
+const ruleOpen = {};
+
+function groupRules(id) {
+    const test = GROUP_MATCH[id];
+    if (!test || !onRulesMatching) return null;
+    const list = onRulesMatching(test) || [];
+    const mine = list.filter(r => r.mine).length;
+    const theirs = list.length - mine;
+    const box = h('div.vte-tb-section.vte-tb-theme.vte-grp-rules');
+    if (!list.length) {
+        box.appendChild(h('small.vte-note', { text: 'В теме про это пока ничего нет.' }));
+        return box;
+    }
+    const parts = [];
+    if (theirs) parts.push(`в теме: ${theirs}`);
+    if (mine) parts.push(`в «Моих правках»: ${mine}`);
+    const over = list.filter(r => r.over);
+    const overLines = over.reduce((n, r) => n + r.over.dead, 0);
+    if (over.length) parts.push(`перекрыто строк: ${overLines}`);
+    box.appendChild(h('button.vte-tb-ext-toggle', {
+        type: 'button', title: 'Какие правила про этот раздел уже есть — нажмите на правило, чтобы увидеть его в коде',
+        on: { click: () => { ruleOpen[id] = !ruleOpen[id]; render(); } },
+    }, [icon(ruleOpen[id] ? 'fa-chevron-up' : 'fa-chevron-down'), h('span', { text: ` Уже есть — ${parts.join(', ')}` })]));
+    if (ruleOpen[id] && over.length && onCleanOverridden) {
+        let armed = 0;
+        const btn = h('button.vte-btn.vte-grp-clean', {
+            type: 'button', title: 'Удалить из кода строки темы, которые перекрыты и ничего не делают',
+            on: {
+                click: () => {
+                    if (!armed) {
+                        btn.classList.add('armed');
+                        btn.lastChild.textContent = ' Нажмите ещё раз — убрать';
+                        armed = setTimeout(() => { armed = 0; btn.classList.remove('armed'); btn.lastChild.textContent = ` Убрать перекрытое (${overLines})`; }, 3000);
+                        return;
+                    }
+                    clearTimeout(armed);
+                    const n = onCleanOverridden(over.map(r => r.start));
+                    say(n ? `Убрано перекрытого: ${n}. Вернуть — «Как было до открытия»` : 'Убирать нечего');
+                },
+            },
+        }, [icon('fa-broom'), h('span', { text: ` Убрать перекрытое (${overLines})` })]);
+        box.appendChild(btn);
+    }
+    if (ruleOpen[id]) {
+        for (const r of list) {
+            box.appendChild(h('div.vte-grp-rule', {}, [
+                h('button.vte-tb-rule', {
+                    type: 'button', title: 'Показать в коде',
+                    on: { click: () => onReveal?.(r.from, r.to) },
+                }, [
+                    h(`span.vte-grp-rule-tag${r.mine ? '.mine' : ''}`, { text: r.mine ? 'мои' : 'тема' }),
+                    r.over ? h('span.vte-grp-rule-tag.over', {
+                        text: r.over.dead >= r.over.total ? 'перекрыто' : `перекрыто ${r.over.dead} из ${r.over.total}`,
+                        title: 'Эти строки уже ничего не делают: то же свойство берётся из другого правила (обычно из «Моих правок»)',
+                    }) : null,
+                    // «Что за что отвечает» — простыми словами
+                    h('span.vte-grp-rule-what', { text: explainRule(r.parts || r.selector, r.decls || []) }),
+                    h('code.vte-tb-rule-sel', { text: r.selector }),
+                ]),
+                // «Мои» правила пишут настройки окна — удалённое вернулось бы
+                // при следующей правке. Их убирают ↺ у настройки
+                onDeleteRule && !r.mine ? deleteBtn(r) : null,
+            ]));
+        }
+    }
+    return box;
+}
+
+/** Корзина у правила: первое нажатие — «точно?», второе — удалить */
+function deleteBtn(r) {
+    let armed = 0;
+    const btn = h('button.vte-icon-btn.vte-tb-mini.vte-grp-rule-del', {
+        type: 'button', title: 'Удалить это правило из кода целиком',
+        on: {
+            click: (e) => {
+                e.stopPropagation();
+                if (!armed) {
+                    btn.classList.add('armed');
+                    btn.title = 'Нажмите ещё раз — удалить. Вернуть: «Как было до открытия» или отмена в коде';
+                    armed = setTimeout(() => { armed = 0; btn.classList.remove('armed'); btn.title = 'Удалить это правило из кода целиком'; }, 3000);
+                    return;
+                }
+                clearTimeout(armed);
+                if (onDeleteRule?.(r.from, r.to)) say('Правило удалено из кода');
+            },
+        },
+    }, [icon('fa-trash-can')]);
+    return btn;
+}
+
 function group(id, title, children) {
     const list = children.filter(Boolean);
+    if (open[id]) { const rl = groupRules(id); if (rl) list.unshift(rl); }
     const head = h(`button.vte-av-group-head${open[id] ? '.open' : ''}`, {
         type: 'button',
         on: { click: () => { open[id] = !open[id]; render(); } },
