@@ -144,7 +144,32 @@ function refreshTools() {
 
 let toolWriting = false;   // пишет сам инструмент — обновлять его окно не надо
 
+/**
+ * Где новый текст отличается от старого: [начало, конец] в новом тексте,
+ * по целым строкам. Слишком большой кусок — только первые строки, чтобы
+ * подсветка не заливала пол-экрана
+ */
+function changedRange(prev, next) {
+    if (prev === next) return null;
+    let a = 0;
+    const max = Math.min(prev.length, next.length);
+    while (a < max && prev.charCodeAt(a) === next.charCodeAt(a)) a++;
+    let e = 0;
+    while (e < max - a && prev.charCodeAt(prev.length - 1 - e) === next.charCodeAt(next.length - 1 - e)) e++;
+    let b = next.length - e;
+    a = next.lastIndexOf('\n', a - 1) + 1;
+    const nl = next.indexOf('\n', b);
+    b = nl === -1 ? next.length : nl;
+    if (b - a > 1500) {
+        let cut = a;
+        for (let i = 0; i < 12 && cut !== -1; i++) cut = next.indexOf('\n', cut + 1);
+        if (cut > a) b = cut;
+    }
+    return [a, Math.max(a, b)];
+}
+
 function writeCSS(css, opts = {}) {
+    const prevCSS = customCSS || '';
     customCSS = css;
     // Любая правка CSS (код, отмена, другое окно) — окна инструментов
     // перечитывают свои значения из темы
@@ -166,6 +191,10 @@ function writeCSS(css, opts = {}) {
 
     if (!opts.skipEditor && editor?.isOpen?.()) {
         editor.setContent(css, { silent: true });
+        // Правка из окна или вкладки — сразу показать её в коде и подсветить
+        // на 3 секунды (без фокуса: ползунок в окне остаётся под рукой)
+        const r = changedRange(prevCSS, css);
+        if (r) setTimeout(() => editor.revealRange?.(r[0], r[1], { hold: 3000 }), 30);
     }
     scheduleParse(css);
 }
@@ -349,6 +378,7 @@ function deactivate() {
     bottombar?.hidePanel?.();
     panels?.hidePanel?.();
     decor?.hidePanel?.();
+    bubbles?.hideMarkdown?.();
     gallery?.hidePanel?.();
     // cleanup вместо stopPreview: снимает ещё и наблюдатель видимости
     // вместе с тегами <link>, подгруженными ради предпросмотра списка
@@ -2974,6 +3004,10 @@ async function boot() {
         isCodeOpen: () => !!editor.isOpen?.(),
         // Кнопка в шапке рядом с лупой: где окно редактора
         onDockMenu: (el) => openToolPop(el, buildDockPop),
+        onSendPlaceholder: async (text) => {
+            await bottombar.setPlaceholder?.(text);
+            toast('Надпись в поле сообщения записана (настраивается в «Нижней панели»)');
+        },
         isDocked: () => (cfg().dock || 'off') !== 'off',
         onUndo: undo,
         onRedo: redo,
@@ -3001,6 +3035,10 @@ async function boot() {
               title: 'Фон выезжающих панелей (настройки ИИ, подключение, форматирование, расширения, персонажи…), кнопки в них и все ползунки',
               onClick: () => panels.togglePanel(),
               isActive: () => !!panels.isOpen?.() },
+            { id: 'markdown', icon: 'fa-paragraph', label: 'Markdown',
+              title: 'Текст в сообщениях: размер, цвет, интервалы, фон под абзацами — и разметка: курсив, жирный, кавычки, цитаты, код, линия',
+              onClick: () => bubbles.toggleMarkdown(),
+              isActive: () => !!bubbles.isMarkdownOpen?.() },
             { id: 'decorwin', icon: 'fa-shapes', label: 'Декор',
               title: 'Картинки и значки поверх таверны: двигать, растягивать, вращать прямо на странице. Здесь же декор по бокам чата',
               onClick: () => decor.togglePanel(),
@@ -3135,6 +3173,8 @@ async function boot() {
     });
 
     bubbles.init({
+        onMdSnapshot: () => snapshotFor('markdown'),
+        onMdRestore: () => restoreFor('markdown'),
         onApply: applyToolRules,
         onSnapshot: () => snapshotFor('bubbles'),
         onRestore: () => restoreFor('bubbles'),

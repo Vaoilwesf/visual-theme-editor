@@ -1110,9 +1110,27 @@ function hostNeedsRelative() {
     }
 }
 
+/** Элемент сам прокручивается (как лента чата #chat)? */
+function hostScrolls() {
+    const el = ctxInfo.element;
+    if (!el || el.nodeType !== 1) return false;
+    try { return /auto|scroll/.test(getComputedStyle(el).overflowY); } catch { return false; }
+}
+
 function apply() {
     const url = buildUrlValue();
     if (!url) return;
+
+    /* Слой (::after, position: absolute; inset: 0) внутри прокручиваемого
+       элемента уезжает вместе с содержимым: у ленты чата картинка была видна
+       только в самом верху и «пропадала». Фон самого элемента так не делает —
+       он стоит на месте, а содержимое едет поверх. Поэтому для таких элементов
+       слой «под содержимым» ставим обычным фоном */
+    if (role === 'overlay' && overlayLevel === 'under' && hostScrolls()) {
+        setRole('background', { manual: true });
+        if (els.roleNote) els.roleNote.textContent = 'Этот элемент прокручивается — слой уезжал бы вместе с ним. '
+            + 'Картинка поставлена фоном самого элемента: она стоит на месте. Для фона чата есть ещё «Пузыри → Фон чата» — там и прозрачность.';
+    }
 
     const size = sizeValue();
     const repeat = repeatValue();

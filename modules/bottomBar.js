@@ -395,9 +395,12 @@ function buildRules(s) {
     /* ---------- своя надпись ---------- */
     const ph = on && String(s.phText || '').trim();
     for (const focus of [false, true]) {
-        const act = ph && s.phFocus === focus;
+        /* Своя надпись — только пока поле не в фокусе. Родную подсказку ST
+           прячем всегда (и в фокусе): раньше при нажатии в поле она
+           возвращалась, и казалось, что надпись «сбросилась» */
+        const act = ph && !focus;
         const sel = phSel(focus);
-        put(phHide(focus), 'opacity', act ? '0' : '');
+        put(phHide(focus), 'opacity', ph && focus ? '0' : '');
         put(sel, 'background-image', act ? phSvg(s) : '');
         put(sel, 'background-repeat', act ? 'no-repeat' : '');
         put(sel, 'background-position', act ? ({ left: 'left 8px center', right: 'right 8px center' }[s.phAlign] || 'center') : '');
@@ -471,6 +474,17 @@ export function refresh() {
     if (els.body) els.body.scrollTop = scroll;
 }
 
+/** Своя надпись из вкладки «Текст» редактора: для поля сообщения — сюда,
+    иначе было бы два разных способа на одно поле */
+export async function setPlaceholder(text) {
+    onSnapshot?.();
+    state = readState();
+    state.phText = String(text || '');
+    state.on = true;
+    await commit();
+    if (isOpen()) render();
+}
+
 export function hidePanel() {
     clearPreview();
     closeGlyphPicker();
@@ -531,7 +545,20 @@ function phTextField() {
     });
 }
 
+/* Перерисовка окна не сбрасывает прокрутку: раньше после любой
+   настройки окно уезжало в самый верх */
 function render() {
+    const b = els.body;
+    const top = b ? b.scrollTop : 0;
+    renderInner();
+    if (b && top) {
+        b.scrollTop = top;
+        // содержимое могло дорисоваться позже (картинки, шрифты)
+        requestAnimationFrame(() => { if (b.scrollTop < top) b.scrollTop = top; });
+    }
+}
+
+function renderInner() {
     els.body.textContent = '';
     els.body.append(...screen().filter(Boolean));
 }
@@ -643,7 +670,6 @@ function screen() {
             ph ? check('phItalic', 'Курсив') : null,
             ph ? check('phBold', 'Жирный') : null,
             ph ? row('Где', select('phAlign', [['center', 'по центру'], ['left', 'слева'], ['right', 'справа']])) : null,
-            ph ? check('phFocus', 'Не прятать, когда нажали в поле', 'Обычно надпись исчезает, как только поле в фокусе') : null,
         ]),
 
         h('div.vte-tb-foot', {}, [

@@ -784,7 +784,7 @@ let themeObserver = null;
 let themeTimer = null;
 
 /* Все панели редактора, которые красит тема */
-const THEMED_PANELS = '#vte-code-panel, #vte-inspector-panel, #vte-templates-panel, #vte-colorpicker, #vte-topbar-panel, #vte-fonts-panel, #vte-headers-panel, #vte-avatars-panel, #vte-bubbles-panel, #vte-bottom-panel, #vte-panels-panel, #vte-decor-panel, #vte-gallery-panel, #vte-float-btn, #vte-confirm';
+const THEMED_PANELS = '#vte-code-panel, #vte-inspector-panel, #vte-templates-panel, #vte-colorpicker, #vte-topbar-panel, #vte-fonts-panel, #vte-headers-panel, #vte-avatars-panel, #vte-bubbles-panel, #vte-markdown-panel, #vte-bottom-panel, #vte-panels-panel, #vte-decor-panel, #vte-gallery-panel, #vte-float-btn, #vte-confirm';
 let themeStyle = null;
 
 /**

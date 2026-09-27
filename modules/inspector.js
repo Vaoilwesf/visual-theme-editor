@@ -17,7 +17,8 @@ let onRedo = null;
 let onOpenTemplates = null;
 let onToggleCode = null;
 let isCodeOpen = null;
-let onDockMenu = null;   // (кнопка) => меню «где окно редактора»
+let onDockMenu = null;
+let onSendPlaceholder = null;   // надпись в поле сообщения — через «Нижнюю панель»   // (кнопка) => меню «где окно редактора»
 let isDocked = null;
 let onDone = null;
 let picker = null;
@@ -285,6 +286,7 @@ export function init(options = {}) {
     onToggleCode = options.onToggleCode || null;
     isCodeOpen = options.isCodeOpen || null;
     onDockMenu = options.onDockMenu || null;
+    onSendPlaceholder = options.onSendPlaceholder || null;
     isDocked = options.isDocked || null;
     onDone = options.onDone || null;
     onTextApply = options.onTextApply || null;
@@ -1001,6 +1003,13 @@ function applyTextReplace(scenario, newText) {
 
     if (scenario.type === 'content') {
         ruleset.push({ selector: sel, decls: { content: quoted } });
+    }
+
+    else if (scenario.type === 'placeholder' && el?.id === 'send_textarea' && onSendPlaceholder) {
+        // Поле сообщения: надпись делает «Нижняя панель» — картинкой в самом
+        // поле. Слой ::after поверх родителя сбивался при нажатии в поле
+        onSendPlaceholder(newText);
+        return;
     }
 
     else if (scenario.type === 'placeholder') {

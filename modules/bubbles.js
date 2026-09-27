@@ -33,6 +33,8 @@ let onToast = null;
 let picker = null;
 let onSnapshot = null;
 let onRestore = null;
+let onMdSnapshot = null;   // окно «Markdown» — свой снимок «как было до открытия»
+let onMdRestore = null;
 
 let panel = null;
 let els = {};
@@ -72,6 +74,7 @@ const S = {
     code: (r) => `${base(r)} .mes_text :not(pre) > code`,
     hrA: (r) => `${base(r)} .mes_text hr::after`,
     para: (r) => `${base(r)} .mes_text p`,
+    paraA: (r) => `${base(r)} .mes_text p::after`,
     // кнопки
     btns: (r) => `${base(r)} .mes_buttons`,
     btnAll: (r) => `${base(r)} :is(.mes_button, .extraMesButtons > div)`,
@@ -167,6 +170,8 @@ export function init(options = {}) {
     picker = options.picker || null;
     onSnapshot = options.onSnapshot || null;
     onRestore = options.onRestore || null;
+    onMdSnapshot = options.onMdSnapshot || null;
+    onMdRestore = options.onMdRestore || null;
 }
 
 const say = (t) => onToast?.(t);
@@ -208,12 +213,15 @@ function iconBtn(faName, title, onClick, extra) {
 ============================================================ */
 /* Поля, которые бывают разными у бота и у пользователя, по разделам */
 const ROLE_GROUPS = {
-    bubble: ['bg', 'bw', 'bc', 'radius', 'padT', 'padB', 'padX', 'maxW', 'fsMin', 'fsMax', 'trimT', 'trimB'],
-    colors: ['cText', 'cEm', 'cStrong', 'cQuote', 'cU', 'bqText', 'bqBar', 'bqBarW', 'bqBg', 'hrColor', 'hrStyle', 'hrThick', 'hrOp',
+    bubble: ['bg', 'bw', 'bc', 'radius', 'padT', 'padB', 'padX', 'maxW', 'trimT', 'trimB'],
+    // «Текст»: размер, цвет и вид текста целиком
+    textall: ['fsMin', 'fsMax', 'cText', 'tLh', 'tPGap', 'tIndent', 'tLetter', 'tHyph', 'tNoShadow',
+        'tBg', 'tBgPad', 'tBgRad', 'tBgBw', 'tBgBs', 'tBgBc', 'tBgBlock'],
+    colors: ['cEm', 'cStrong', 'cQuote', 'cU', 'bqText', 'bqBar', 'bqBarW', 'bqBg', 'hrColor', 'hrStyle', 'hrThick', 'hrOp',
         'qStyle', 'emStyle', 'strongStyle', 'uStyle', 'bqStyle', 'codeStyle',
         'qAcc', 'qFill', 'emAcc', 'emFill', 'strongAcc', 'strongFill', 'uAcc', 'uFill', 'bqAcc', 'bqFill', 'codeAcc', 'codeFill',
         'hrSign', 'hrSignColor'],
-    text: ['textFull', 'offY', 'offX', 'textW', 'textAlign', 'tLh', 'tPGap', 'tIndent', 'tLetter', 'tHyph', 'tNoShadow'],
+    text: ['textFull', 'offY', 'offX', 'textW', 'textAlign'],
     names: ['nameCorner', 'nameX', 'nameY', 'datePos', 'dateX', 'dateY', 'nameSize', 'nameColor', 'nameNoWrap', 'nameWidth', 'dateSize', 'dateColor'],
     buttons: ['btnTop', 'btnPlace', 'btnCorner', 'btnXMin', 'btnXMax', 'btnYMin', 'btnYMax', 'btnDir',
         'btnSMin', 'btnSMax', 'btnColor', 'btnOpacity', 'btnHover', 'btnBg', 'btnRadius', 'btnPad', 'btnGap', 'btnNoShadow',
@@ -229,6 +237,9 @@ function roleDefaults() {
         // текст целиком: межстрочный (×100), между абзацами (px), красная строка (×10 em),
         // межбуквенный (×100 em), переносы, без тени
         tLh: 0, tPGap: 0, tIndent: 0, tLetter: 0, tHyph: false, tNoShadow: false,
+        // фон под абзацами обычного текста: цвет, насколько больше текста, края, рамка
+        tBg: '', tBgPad: 0, tBgRad: 0, tBgBw: 0, tBgBs: '', tBgBc: '',
+        tBgBlock: false,   // фон прямоугольником на весь абзац (иначе — только под буквами)
         cText: '', cEm: '', cStrong: '', cQuote: '', cU: '',
         // цитата (> текст): текст, полоса слева, её толщина, фон
         bqText: '', bqBar: '', bqBarW: 0, bqBg: '',
@@ -300,7 +311,7 @@ function defaults() {
     return {
         on: false,
         role: 'bot',                 // какую вкладку правим, когда разведены
-        link: { bubble: true, colors: true, text: true, names: true, buttons: true },
+        link: { bubble: true, textall: true, colors: true, text: true, names: true, buttons: true },
         glyphs: {},                  // класс кнопки → { code, brand } | { img }
         bot: roleDefaults(),
         user: roleDefaults(),
@@ -353,6 +364,7 @@ function setVal(key, v) {
     // Обрезка фона: фон и рамка темы переезжают в слой за текстом — берём
     // их с живого пузыря, если своих ещё нет (видно в окне, можно поменять)
     if ((key === 'trimT' || key === 'trimB') && v && !val('trimT') && !val('trimB')) captureBubble();
+    { const m = key.match(/^(btn|ed)[XY](Min|Max)$/); if (m && v && !val(`${m[1]}Place`)) setVal(`${m[1]}Place`, 'row'); }
     const g = GROUP_OF[key];
     state.on = true;
     if (!g) { state[key] = v; return; }
@@ -402,7 +414,9 @@ function readSigned(v) {
 }
 
 const tr = (v) => {
-    const m = String(v || '').match(/translate\(\s*(-?\d+(?:\.\d+)?)px\s*,\s*(-?\d+(?:\.\d+)?)px/);
+    // Сдвиг бейджей пишется как translate(calc(Xpx …), Ypx) — calc тоже читаем:
+    // раньше X и Y не узнавались и при следующей записи сбрасывались в 0
+    const m = String(v || '').match(/translate\(\s*(?:calc\(\s*)?(-?\d+(?:\.\d+)?)px[^,]*,\s*(-?\d+(?:\.\d+)?)px/);
     return m ? [+m[1], +m[2]] : [0, 0];
 };
 
@@ -423,12 +437,10 @@ const READ = {
             padT: num(get(box, 'padding-top')), padB: num(get(box, 'padding-bottom')),
             padX: num(get(box, 'padding-left')),
             maxW: num(get(box, 'max-width')),
-            fsMin: fs.min, fsMax: fs.max,
         };
     },
     colors(get, r) {
         return {
-            cText: get(S.text(r), 'color'),
             cEm: get(S.text(r), '--SmartThemeEmColor'),
             cQuote: get(S.text(r), '--SmartThemeQuoteColor'),
             cU: get(S.text(r), '--SmartThemeUnderlineColor'),
@@ -457,12 +469,30 @@ const READ = {
             offX: num(get(S.text(r), 'left') || (ta || w ? '' : get(S.text(r), 'margin-left'))),
             textW: w ? +w[1] : 0,
             textAlign: ({ left: 'left', center: 'center', right: 'right', justify: 'justify' })[ta] || '',
+        };
+    },
+    textall(get, r) {
+        const fs = readFluid(get(S.text(r), 'font-size'));
+        return {
+            fsMin: fs.min, fsMax: fs.max,
+            cText: get(S.text(r), 'color'),
             tLh: Math.round((parseFloat(get(S.text(r), 'line-height')) || 0) * 100),
-            tPGap: num(get(S.para(r), 'margin-bottom')),
+            tPGap: num(get(S.para(r), 'margin-bottom') || (/px$/.test(get(S.paraA(r), 'height')) ? get(S.paraA(r), 'height') : '')),
             tIndent: Math.round((parseFloat(get(S.para(r), 'text-indent')) || 0) * 10),
             tLetter: Math.round((parseFloat(get(S.text(r), 'letter-spacing')) || 0) * 100),
             tHyph: get(S.text(r), 'hyphens') === 'auto',
             tNoShadow: get(S.text(r), 'text-shadow') === 'none',
+            tBg: get(S.para(r), 'background-color'),
+            tBgBlock: !!get(S.para(r), 'background-color') && get(S.para(r), 'display') !== 'inline',
+            // по строкам паддинг пишется «пол / целый» — берём второй
+            tBgPad: get(S.para(r), 'display') === 'inline'
+                ? num((get(S.para(r), 'box-shadow').match(/^-(\d+)px/) || [])[1])
+                : num(get(S.para(r), 'padding')),
+            tBgRad: num(get(S.para(r), 'border-radius')),
+            ...(() => {
+                const b = get(S.para(r), 'border').match(/^(\d+)px\s+(solid|dashed|dotted|double)\s+(.+)$/);
+                return { tBgBw: b ? +b[1] : 0, tBgBs: b && b[2] !== 'solid' ? b[2] : '', tBgBc: b && b[3] !== 'currentColor' ? b[3] : '' };
+            })(),
         };
     },
     buttons(get, r) {
@@ -853,16 +883,10 @@ function buildRules(s) {
             put(box, '--vte-mes-pr', t === 'mes' && w?.padX ? `${w.padX}px` : '');
             put(box, 'box-sizing', w && (w.padX || w.bw || w.maxW) ? 'border-box' : '');
         }
-        // Размер текста: ST считает высоту строки от --mainFontSize, поэтому
-        // меняем и её — строки не слипаются и не разъезжаются
-        const fs = v ? fluid(v.fsMin, v.fsMax) : '';
-        put(S.text(r), 'font-size', fs);
-        put(S.text(r), '--mainFontSize', fs);
     });
 
     /* ---------- цвета текста ---------- */
     each('colors', (r, v) => {
-        put(S.text(r), 'color', v?.cText || '');
         put(S.text(r), '--SmartThemeEmColor', v?.cEm || '');
         put(S.text(r), '--SmartThemeQuoteColor', v?.cQuote || '');
         put(S.text(r), '--SmartThemeUnderlineColor', v?.cU || '');
@@ -922,15 +946,46 @@ function buildRules(s) {
     });
 
     /* ---------- текст целиком ---------- */
-    each('text', (r, v) => {
+    each('textall', (r, v) => {
+        // Размер текста: ST считает высоту строки от --mainFontSize, поэтому
+        // меняем и её — строки не слипаются и не разъезжаются
+        const fs = v ? fluid(v.fsMin, v.fsMax) : '';
+        put(S.text(r), 'font-size', fs);
+        put(S.text(r), '--mainFontSize', fs);
+        put(S.text(r), 'color', v?.cText || '');
         put(S.text(r), 'line-height', v?.tLh ? String(r2(v.tLh / 100)) : '');
         put(S.text(r), 'letter-spacing', v?.tLetter ? `${r2(v.tLetter / 100)}em` : '');
         put(S.text(r), 'hyphens', v?.tHyph ? 'auto' : '');
         put(S.text(r), '-webkit-hyphens', v?.tHyph ? 'auto' : '');
         // Тень под буквами ST рисует на каждом сообщении — без неё легче
         put(S.text(r), 'text-shadow', v?.tNoShadow ? 'none' : '');
-        put(S.para(r), 'margin-bottom', v?.tPGap ? `${v.tPGap}px` : '');
-        put(S.para(r), 'text-indent', v?.tIndent ? `${r2(v.tIndent / 10)}em` : '');
+        /* Фон под буквами: абзац становится строчным — фон тогда идёт по
+           строкам и кончается там, где кончается текст (с clone у каждой
+           строки свои края). Конец абзаца — блок ::after: он переносит
+           строку и держит расстояние между абзацами */
+        const lines = !!v?.tBg && !v?.tBgBlock;
+        const indent = v?.tIndent ? `${r2(v.tIndent / 10)}em` : '';
+        put(S.para(r), 'display', lines ? 'inline' : '');
+        put(S.para(r), 'box-decoration-break', lines ? 'clone' : '');
+        put(S.para(r), '-webkit-box-decoration-break', lines ? 'clone' : '');
+        put(S.para(r), 'line-height', lines && v?.tBgPad ? `calc(1em * ${r2((v.tLh || 150) / 100)} + ${v.tBgPad}px)` : '');
+        put(S.paraA(r), 'content', lines ? '""' : '');
+        put(S.paraA(r), 'display', lines ? 'block' : '');
+        put(S.paraA(r), 'height', lines ? (v.tPGap ? `${v.tPGap}px` : '0.6em') : '');
+        put(S.para(r), 'margin-bottom', !lines && v?.tPGap ? `${v.tPGap}px` : '');
+        put(S.para(r), 'text-indent', !lines ? indent : '');
+        // Строчному абзацу красную строку не даём: браузер повторяет отступ
+        // у каждого кусочка фона, и следующий абзац уезжал вправо
+        put(S.para(r), 'margin-left', '');
+        // Фон: отступ — насколько фон больше текста
+        put(S.para(r), 'background-color', v?.tBg || '');
+        // По строкам фон шире текста за счёт теней без размытия, а не отступа:
+        // у отступа по бокам остаётся пустой кусочек на следующей строке
+        put(S.para(r), 'padding', v?.tBgPad ? (lines ? `${Math.round(v.tBgPad / 2)}px 0` : `${v.tBgPad}px ${Math.round(v.tBgPad * 1.4)}px`) : '');
+        put(S.para(r), 'box-shadow', lines && v?.tBgPad && v?.tBg ? `-${v.tBgPad}px 0 0 ${v.tBg}, ${v.tBgPad}px 0 0 ${v.tBg}` : '');
+        put(S.para(r), 'border-radius', v?.tBgRad ? `${v.tBgRad}px` : '');
+        // Рамка — только прямоугольником: по строкам у неё тоже оставались бы кусочки
+        put(S.para(r), 'border', v?.tBgBw && !lines ? `${v.tBgBw}px ${v.tBgBs || 'solid'} ${v.tBgBc || 'currentColor'}` : '');
     });
 
     /* ---------- положение текста ----------
@@ -1341,7 +1396,7 @@ export async function showPanel() {
 }
 
 export function refresh() {
-    if (!isOpen()) return;
+    if (!isOpen() && !isMarkdownOpen()) return;
     const prev = state;
     const scroll = els.body?.scrollTop || 0;
     state = readState();
@@ -1400,7 +1455,7 @@ function slider(key, min, max, unit, zeroText, hint, step = 1) {
         title: hint || '',
         on: {
             input: (e) => { setVal(key, +e.target.value); show(); preview(); },
-            change: () => { commit(); if (/PanBw$/.test(key)) render(); },
+            change: () => { commit(); if (/PanBw$|^tBgBw$/.test(key)) render(); },
         },
     });
     show();
@@ -1535,7 +1590,7 @@ function select(key, options, after) {
 }
 
 /* Какие разделы раскрыты */
-const open = { bubble: true, colors: false, text: false, names: false, buttons: false, chatbg: false, scroll: false, badges: false };
+const open = { bubble: true, textall: false, colors: false, text: false, names: false, buttons: false, chatbg: false, scroll: false, badges: false };
 
 function chatBgUi() {
     const img = !!state.cImg;
@@ -1576,7 +1631,7 @@ function group(id, title, children) {
         type: 'button',
         on: { click: () => { open[id] = !open[id]; render(); } },
     }, [icon(open[id] ? 'fa-chevron-down' : 'fa-chevron-right'), h('span', { text: title })]);
-    return h('div.vte-av-group', {}, [head, open[id] ? h('div.vte-av-group-body', {}, list) : null]);
+    return h('div.vte-av-group', { dataset: { gid: id } }, [head, open[id] ? h('div.vte-av-group-body', {}, list) : null]);
 }
 
 /** Связка «бот и пользователь вместе» + вкладки, когда разведены */
@@ -1611,13 +1666,104 @@ function roleBar(g) {
     return h('div.vte-bb-rolebar', {}, [toggle, tabs]);
 }
 
+/* Перерисовка окна не сбрасывает прокрутку: раньше после любой
+   настройки окно уезжало в самый верх */
 function render() {
-    const b = els.body;
-    b.textContent = '';
-    b.append(...screen().filter(Boolean));
+    // Два окна на одном состоянии: «Пузыри» и «Markdown»
+    for (const [b, mode] of [[els.body, 'main'], [mdEls.body, 'md']]) {
+        if (!b || b.parentElement?.style.display === 'none') continue;
+        const top = b.scrollTop;
+        b.textContent = '';
+        b.append(...screen(mode).filter(Boolean));
+        if (top) {
+            b.scrollTop = top;
+            // содержимое могло дорисоваться позже (картинки, шрифты)
+            requestAnimationFrame(() => { if (b.scrollTop < top) b.scrollTop = top; });
+        }
+    }
 }
 
-function screen() {
+/* Разделы окна «Markdown»: обычный текст и разметка */
+const MD_GROUPS = new Set(['textall', 'colors']);
+
+function screen(mode = 'main') {
+    const all = screenAll();
+    const isGroup = (x) => x?.dataset?.gid;
+    if (mode === 'md') return [...all.filter(x => isGroup(x) && MD_GROUPS.has(x.dataset.gid)), ...mdFoot()];
+    return all.filter(x => !(isGroup(x) && MD_GROUPS.has(x.dataset.gid)));
+}
+
+function mdFoot() {
+    return [
+        h('div.vte-tb-foot', {}, [
+            h('button.vte-btn', {
+                type: 'button', title: 'Убрать всё, что это окно записало в тему (обычный текст и разметку)',
+                on: { click: resetMarkdown },
+            }, [icon('fa-rotate-left'), h('span', { text: ' Сбросить все настройки окна' })]),
+            h('button.vte-btn', {
+                type: 'button', title: 'Отменить всё, что сделано с момента открытия этого окна',
+                on: { click: () => { onMdRestore?.() ? say('Вернула как было при открытии окна') : say('Возвращать нечего'); render(); } },
+            }, [icon('fa-clock-rotate-left'), h('span', { text: ' Как было до открытия' })]),
+        ]),
+    ];
+}
+
+function mdKeys() { return [...ROLE_GROUPS.textall, ...ROLE_GROUPS.colors]; }
+
+function resetMarkdown() {
+    const d = roleDefaults();
+    for (const r of ['bot', 'user']) for (const k of mdKeys()) state[r][k] = d[k];
+    state.link.textall = true;
+    state.link.colors = true;
+    state.on = true;
+    commit();
+    render();
+    say('Текст и разметка снова как в теме');
+}
+
+/* ---------- окно «Markdown» ---------- */
+let mdPanel = null;
+const mdEls = {};
+
+export async function showMarkdown() {
+    onMdSnapshot?.();
+    if (!isOpen()) {
+        const role = state?.role || 'bot';
+        state = readState();
+        state.role = role;
+    }
+    if (!mdPanel) {
+        const header = h('div.vte-header', {}, [
+            h('div.vte-title', {}, [h('span.vte-title-ic', {}, [icon('fa-paragraph')]), h('span', { text: 'Markdown' })]),
+            h('div.vte-header-btns', {}, [iconBtn('fa-xmark', 'Закрыть', hideMarkdown, 'vte-icon-btn-close')]),
+        ]);
+        mdEls.body = h('div.vte-tb-body');
+        mdPanel = h('div#vte-markdown-panel.vte-panel.vte-tb-panel', {}, [header, mdEls.body]);
+        document.body.appendChild(mdPanel);
+        makeDraggable(mdPanel, header);
+        makeResizable(mdPanel, 'vte-markdown-size');
+        ['pointerdown', 'mousedown', 'touchstart', 'click', 'keydown'].forEach(t =>
+            mdPanel.addEventListener(t, (e) => e.stopPropagation()));
+    }
+    open.textall = open.textall || !open.colors;
+    mdPanel.style.display = 'flex';
+    render();
+}
+
+export function hideMarkdown() {
+    if (mdPanel) mdPanel.style.display = 'none';
+    if (!isOpen()) clearPreview();
+}
+
+export function isMarkdownOpen() {
+    return !!mdPanel && mdPanel.style.display !== 'none';
+}
+
+export function toggleMarkdown() {
+    isMarkdownOpen() ? hideMarkdown() : showMarkdown();
+}
+
+function screenAll() {
     return [
         themeSection(),
 
@@ -1641,7 +1787,6 @@ function screen() {
             row('Отступ по бокам', slider('padX', 0, 60, 'px', 'как в теме')),
             row('Ширина пузыря', slider('maxW', 0, 100, '%', 'во всю ширину'),
                 'Считается от ширины чата — на телефоне и ПК пропорция одна'),
-            pair('Размер текста', 'fsMin', 'fsMax', 32, 'Первое — на узком экране, второе — на широком'),
             h('div.vte-bb-shared', { text: 'Общее для всех сообщений' }),
             // Старая настройка: заменена «Шириной текста» и «Выравниванием».
             // Видна, только если уже задана в теме — чтобы её можно было сбросить
@@ -1650,9 +1795,29 @@ function screen() {
             row('Между сообщениями', slider('gapMes', 0, 40, 'px', 'как в теме')),
         ]),
 
-        group('colors', 'Цвета текста', [
+        group('textall', 'Обычный текст', [
+            roleBar('textall'),
+            pair('Размер текста', 'fsMin', 'fsMax', 32, 'Первое — на узком экране, второе — на широком'),
+            row('Цвет текста', colorBtn('cText', 'как в теме')),
+            row('Межстрочный', slider('tLh', 80, 260, '%', 'как в теме', 'Расстояние между строками. 150% — полтора интервала', 5)),
+            row('Между абзацами', slider('tPGap', 0, 40, 'px', 'как в теме')),
+            row('Красная строка', slider('tIndent', 0, 40, '', 'нет', 'Отступ первой строки абзаца (десятые доли размера букв). С фоном под буквами не работает — только с фоном прямоугольником')),
+            row('Между буквами', slider('tLetter', -5, 20, '', 'как в теме', 'Сотые доли размера букв: 5 — чуть шире, −2 — плотнее')),
+            check('tHyph', 'Переносы слов', 'Длинные слова делятся по слогам — особенно помогает с выравниванием «по ширине»'),
+            check('tNoShadow', 'Без тени под буквами (легче)'),
+            h('div.vte-bb-shared', { text: 'Фон под абзацами' }),
+            row('Фон', colorBtn('tBg', 'нет')),
+            row('Фон больше текста на', slider('tBgPad', 0, 24, 'px', 'вплотную')),
+            check('tBgBlock', 'Прямоугольником на весь абзац', 'Обычно фон идёт только под буквами, по строкам — и кончается там, где кончается текст'),
+            row('Края', slider('tBgRad', 0, 30, 'px', 'прямые')),
+            val('tBgBlock') || !val('tBg') ? row('Рамка', slider('tBgBw', 0, 6, 'px', 'нет')) : h('small.vte-note', { text: 'Рамка — в режиме «прямоугольником на весь абзац»: по строкам она рвалась бы на кусочки.' }),
+            val('tBgBw') && (val('tBgBlock') || !val('tBg')) ? row('Линия', select('tBgBs', LINE_STYLES)) : null,
+            val('tBgBw') && (val('tBgBlock') || !val('tBg')) ? row('Цвет рамки', colorBtn('tBgBc', 'цвет текста')) : null,
+            h('small.vte-note', { text: 'Шрифт и его толщина — в окне «Шрифты». Где стоит текст в пузыре — в «Пузырях → Положение текста».' }),
+        ]),
+
+        group('colors', 'Markdown', [
             roleBar('colors'),
-            row('Обычный текст', colorBtn('cText', 'как в теме')),
             row('*Курсив*', colorBtn('cEm', 'как в теме')),
             row('**Жирный**', colorBtn('cStrong', 'как в теме')),
             row('«Кавычки»', colorBtn('cQuote', 'как в теме')),
@@ -1706,13 +1871,6 @@ function screen() {
             row('Выравнивание', select('textAlign', [
                 ['', 'как в теме'], ['left', 'по левому краю'], ['center', 'по центру'], ['right', 'по правому краю'], ['justify', 'по ширине'],
             ], render), 'Выравнивает строки и ставит сам блок текста в пузыре слева, по центру или справа'),
-            h('div.vte-bb-shared', { text: 'Текст целиком' }),
-            row('Межстрочный', slider('tLh', 80, 260, '%', 'как в теме', 'Расстояние между строками. 150% — полтора интервала', 5)),
-            row('Между абзацами', slider('tPGap', 0, 40, 'px', 'как в теме')),
-            row('Красная строка', slider('tIndent', 0, 40, '', 'нет', 'Отступ первой строки абзаца (десятые доли размера букв)')),
-            row('Между буквами', slider('tLetter', -5, 20, '', 'как в теме', 'Сотые доли размера букв: 5 — чуть шире, −2 — плотнее')),
-            check('tHyph', 'Переносы слов', 'Длинные слова делятся по слогам — особенно помогает с выравниванием «по ширине»'),
-            check('tNoShadow', 'Без тени под буквами (легче)'),
         ]),
 
         group('names', 'Ник и дата', [
@@ -1816,10 +1974,13 @@ function placeRows(pre, title) {
     return [
         row(title, select(`${pre}Place`, PLACES, render)),
         p === 'block' ? row('Угол', select(`${pre}Corner`, CORNERS, render)) : null,
-        p ? pair(p === 'block' ? 'От края по горизонтали' : 'Сдвиг вбок', `${pre}XMin`, `${pre}XMax`, 400,
-            'Первое — на телефоне, второе — на ПК. Между ними плавно', -400, 'нет') : null,
-        p ? pair(p === 'block' ? 'От края по вертикали' : 'Сдвиг вверх-вниз', `${pre}YMin`, `${pre}YMax`, 400,
-            'Минус — за край блока', -400, 'нет') : null,
+        // Сдвигать можно всегда: сдвиг «на своём месте» сам включает режим
+        // «в строке ника, сдвинуть» (иначе после переноса ника кнопки
+        // поднимались вместе со строкой и опустить их было нечем)
+        pair(p === 'block' ? 'От края по горизонтали' : 'Сдвиг вбок', `${pre}XMin`, `${pre}XMax`, 400,
+            'Первое — на телефоне, второе — на ПК. Между ними плавно', -400, 'нет'),
+        pair(p === 'block' ? 'От края по вертикали' : 'Сдвиг вверх-вниз', `${pre}YMin`, `${pre}YMax`, 400,
+            p === 'block' ? 'Минус — за край блока' : 'Плюс — ниже, минус — выше', -400, 'нет'),
     ];
 }
 
@@ -2288,19 +2449,34 @@ function scrollUi() {
 /* Готовое сообщение со всеми видами разметки — вставить в чат и смотреть.
    Подчёркнутый в ST — __текст__ (включено в самой таверне) */
 const PANGRAM = 'Съешь же ещё этих мягких французских булок, да выпей чаю.';
+/* Всё, что понимает разметка SillyTavern (showdown с её настройками):
+   заголовки, курсив, жирный, зачёркнутый, подчёркнутый (__…__), речь в
+   кавычках, код в строке и блоком, цитаты (и цитата в цитате), списки,
+   таблица, ссылка и линия. Между видами — пустая строка, чтобы каждый шёл
+   отдельным абзацем */
 const MARKDOWN_SAMPLE = [
+    '# Заголовок первого уровня',
+    '## Заголовок второго уровня',
+    '### Заголовок третьего уровня',
     PANGRAM,
-    `*${PANGRAM}*`,
-    `**${PANGRAM}**`,
-    `"${PANGRAM}"`,
-    `"*${PANGRAM}* — внутри кавычек."`,
-    `__${PANGRAM}__`,
-    `> ${PANGRAM}`,
-    '',
+    `*Курсив: ${PANGRAM}*`,
+    `**Жирный: ${PANGRAM}**`,
+    `***Жирный курсив: ${PANGRAM}***`,
+    `~~Зачёркнутый: ${PANGRAM}~~`,
+    `__Подчёркнутый: ${PANGRAM}__`,
+    `"Речь в кавычках: ${PANGRAM}"`,
+    `"Речь, а в ней *курсив* и **жирный** — внутри кавычек."`,
+    'Код в строке: `const love = true;`',
+    '```\nблок кода\n  с отступом\n```',
+    `> Цитата: ${PANGRAM}`,
+    '> Цитата снаружи\n>> Цитата в цитате',
+    '- пункт списка\n- ещё пункт\n  - вложенный пункт',
+    '1. первый\n2. второй\n3. третий',
+    '| Имя | Настроение |\n|---|---|\n| Бот | *задумчивый* |\n| Я | **счастливый** |',
+    'Ссылка: [SillyTavern](https://github.com/SillyTavern/SillyTavern)',
     '---',
-    '',
     PANGRAM,
-].join('\n');
+].join('\n\n');
 
 async function copyMarkdown() {
     let ok = false;
@@ -2342,7 +2518,13 @@ function themeSection() {
 
 function resetAll() {
     const role = state.role;
+    // Текст и разметка — это окно «Markdown»: их «Сбросить» в «Пузырях» не трогает
+    const keep = { bot: {}, user: {}, link: { textall: state.link.textall, colors: state.link.colors } };
+    for (const r of ['bot', 'user']) for (const k of mdKeys()) keep[r][k] = state[r][k];
     state = { ...defaults(), role };
+    for (const r of ['bot', 'user']) Object.assign(state[r], keep[r]);
+    Object.assign(state.link, keep.link);
+    state.on = true;
     showHidden(hiddenShown);
     commit();
     render();

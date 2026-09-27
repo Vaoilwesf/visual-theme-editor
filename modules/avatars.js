@@ -965,7 +965,20 @@ function group(id, title, children) {
     return h('div.vte-av-group', {}, [head, open[id] ? h('div.vte-av-group-body', {}, list) : null]);
 }
 
+/* Перерисовка окна не сбрасывает прокрутку: раньше после любой
+   настройки окно уезжало в самый верх */
 function render() {
+    const b = els.body;
+    const top = b ? b.scrollTop : 0;
+    renderInner();
+    if (b && top) {
+        b.scrollTop = top;
+        // содержимое могло дорисоваться позже (картинки, шрифты)
+        requestAnimationFrame(() => { if (b.scrollTop < top) b.scrollTop = top; });
+    }
+}
+
+function renderInner() {
     const b = els.body;
     b.textContent = '';
     // Один экран: форма, ширина, шапка и всё остальное — в общих настройках.
