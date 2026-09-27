@@ -64,11 +64,11 @@ function persist() {
 /* ============================================================
    ЗАГРУЗКА МОДУЛЕЙ
 ============================================================ */
-let selector, inspector, generator, fonts, editor, picker, rules, templates, perf, topbar, headers, avatars, gallery, bubbles, bottombar;
+let selector, inspector, generator, fonts, editor, picker, rules, templates, perf, topbar, headers, avatars, gallery, bubbles, bottombar, panels, decor;
 
 async function loadModules() {
     const load = (name) => import(`${BASE}/modules/${name}.js`);
-    [selector, inspector, generator, fonts, editor, picker, rules, templates, perf, topbar, headers, avatars, gallery, bubbles, bottombar] = await Promise.all([
+    [selector, inspector, generator, fonts, editor, picker, rules, templates, perf, topbar, headers, avatars, gallery, bubbles, bottombar, panels, decor] = await Promise.all([
         load('selector'),
         load('inspector'),
         load('cssGenerator'),
@@ -84,6 +84,8 @@ async function loadModules() {
         load('gallery'),
         load('bubbles'),
         load('bottomBar'),
+        load('panels'),
+        load('decor'),
     ]);
 }
 
@@ -133,7 +135,7 @@ function restoreFor(id) {
 
 /** Окна инструментов читают CSS при открытии — после правок обновляем их */
 function refreshTools() {
-    for (const tool of [topbar, headers, avatars, gallery, bubbles, bottombar]) {
+    for (const tool of [topbar, headers, avatars, gallery, bubbles, bottombar, panels, decor]) {
         try { if (tool?.isOpen?.()) tool.refresh?.(); } catch {}
     }
     try { if (fontsPanel && fontsPanel.style.display !== 'none') renderFontsTheme(); } catch {}
@@ -345,6 +347,8 @@ function deactivate() {
     avatars?.hidePanel?.();
     bubbles?.hidePanel?.();
     bottombar?.hidePanel?.();
+    panels?.hidePanel?.();
+    decor?.hidePanel?.();
     gallery?.hidePanel?.();
     // cleanup вместо stopPreview: снимает ещё и наблюдатель видимости
     // вместе с тегами <link>, подгруженными ради предпросмотра списка
@@ -2473,7 +2477,7 @@ function closeToolPop() {
 }
 
 function outsideToolPop(e) {
-    if (toolPop && !toolPop.contains(e.target) && !e.target.closest?.('.vte-tools-btn')) closeToolPop();
+    if (toolPop && !toolPop.contains(e.target) && !e.target.closest?.('.vte-tools-btn, [data-tool]')) closeToolPop();
 }
 
 function openToolPop(anchor, build) {
@@ -2572,13 +2576,41 @@ function buildDockPop(box) {
         }, [h('span', { text: label })]));
     }
     box.append(h('div.vte-tools-note', {
-        text: 'Присоединённое окно ездит вместе с панелью кода: сбоку — от её верха, сверху — прямо над ней, по высоте содержимого, но не выше кода. '
+        text: 'Присоединённое окно ездит вместе с панелью кода: тянешь за шапку — двигаются оба. '
+            + '«Отдельным окном» — окно отцепляется и двигается само по себе. '
             + 'На телефоне окна и так снизу — там присоединение не нужно.',
     }));
 }
 
 let dockCleanup = null;
 let dockRaf = 0;
+
+/**
+ * Окно только что отцепили. Раньше оно оставалось вплотную к коду (и
+ * казалось, что всё ещё присоединено), а после «Над кодом» — уезжало
+ * шапкой за верх экрана: у него оставался bottom, и тянуть было не за что.
+ * Теперь: обычные top/left, чуть в стороне от кода и целиком на экране.
+ */
+function undockPlace(insp, code) {
+    if (window.innerWidth <= 768) return;
+    const s = insp.style;
+    const r = insp.getBoundingClientRect();
+    s.right = 'auto';
+    s.bottom = 'auto';
+    s.height = 'auto';
+    let left = r.left, top = r.top;
+    const c = code && code.style.display !== 'none' ? code.getBoundingClientRect() : null;
+    if (c) {
+        // Отодвинуть от кода, чтобы было видно, что окна больше не вместе
+        if (r.left >= c.right - 2) left = r.left + 24;
+        else if (r.right <= c.left + 2) left = r.left - 24;
+        top = Math.min(r.top, c.top) - 24;
+    }
+    const w = insp.offsetWidth || 340;
+    s.left = `${Math.round(Math.max(0, Math.min(window.innerWidth - w, left)))}px`;
+    s.top = `${Math.round(Math.max(0, Math.min(window.innerHeight - 120, top)))}px`;
+    s.maxHeight = `${Math.max(220, window.innerHeight - Math.max(0, top) - 16)}px`;
+}
 
 function applyDock() {
     dockCleanup?.();
@@ -2587,9 +2619,11 @@ function applyDock() {
     const insp = document.getElementById('vte-inspector-panel');
     const code = document.getElementById('vte-code-panel');
     const side = cfg().dock || 'off';
+    const wasDocked = !!insp?.classList.contains('vte-docked');
     insp?.classList.remove('vte-docked');
     if (insp) delete insp.dataset.dock;
 
+    if (insp && wasDocked && side === 'off') undockPlace(insp, code);
     if (!insp || !code || side === 'off') return;
 
     insp.classList.add('vte-docked');
@@ -2938,6 +2972,9 @@ async function boot() {
             inspector.refreshTools?.();
         },
         isCodeOpen: () => !!editor.isOpen?.(),
+        // Кнопка в шапке рядом с лупой: где окно редактора
+        onDockMenu: (el) => openToolPop(el, buildDockPop),
+        isDocked: () => (cfg().dock || 'off') !== 'off',
         onUndo: undo,
         onRedo: redo,
         isLite: () => !!cfg().liteEffects,
@@ -2960,6 +2997,14 @@ async function boot() {
               title: 'Панель ввода: фон, рамка, форма, кнопки и их значки, поле ввода, своя надпись в пустом поле',
               onClick: () => bottombar.togglePanel(),
               isActive: () => !!bottombar.isOpen?.() },
+            { id: 'panels', icon: 'fa-window-restore', label: 'Панели',
+              title: 'Фон выезжающих панелей (настройки ИИ, подключение, форматирование, расширения, персонажи…), кнопки в них и все ползунки',
+              onClick: () => panels.togglePanel(),
+              isActive: () => !!panels.isOpen?.() },
+            { id: 'decorwin', icon: 'fa-shapes', label: 'Декор',
+              title: 'Картинки и значки поверх таверны: двигать, растягивать, вращать прямо на странице. Здесь же декор по бокам чата',
+              onClick: () => decor.togglePanel(),
+              isActive: () => !!decor.isOpen?.() },
             { id: 'headers', icon: 'fa-heading', label: 'Заголовки',
               title: 'Стили всех заголовков: рамки, цвета, украшения', onClick: () => headers.togglePanel(),
               isActive: () => !!headers.isOpen?.() },
@@ -2978,10 +3023,6 @@ async function boot() {
               title: 'Показать или скрыть панель кода',
               onClick: () => { editor.isOpen?.() ? editor.hidePanel() : (editor.showPanel(), editor.setContent(customCSS)); inspector.refreshTools?.(); },
               isActive: () => !!editor.isOpen?.() },
-            { id: 'dock', icon: 'fa-table-columns', label: 'К коду',
-              title: 'Присоединить это окно к панели кода',
-              onClick: (el) => openToolPop(el, buildDockPop),
-              isActive: () => (cfg().dock || 'off') !== 'off' },
         ],
     });
 
@@ -3056,6 +3097,33 @@ async function boot() {
         onApply: applyToolRules,
         onSnapshot: () => snapshotFor('bottombar'),
         onRestore: () => restoreFor('bottombar'),
+        onReadRules: () => generator.autoRules(customCSS),
+        onThemeRules: themeRulesForParts,
+        onReveal: (from, to) => {
+            if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
+            setTimeout(() => editor.revealRange?.(from, to, { focus: true, hold: 4000 }), 60);
+        },
+        onToast: (t) => toast(t),
+        picker,
+    });
+
+    decor.init({
+        onApply: applyToolRules,
+        onSnapshot: () => snapshotFor('decor'),
+        onRestore: () => restoreFor('decor'),
+        onReadRules: () => generator.autoRules(customCSS),
+        onReveal: (from, to) => {
+            if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
+            setTimeout(() => editor.revealRange?.(from, to, { focus: true, hold: 4000 }), 60);
+        },
+        onToast: (t) => toast(t),
+        picker,
+    });
+
+    panels.init({
+        onApply: applyToolRules,
+        onSnapshot: () => snapshotFor('panels'),
+        onRestore: () => restoreFor('panels'),
         onReadRules: () => generator.autoRules(customCSS),
         onThemeRules: themeRulesForParts,
         onReveal: (from, to) => {

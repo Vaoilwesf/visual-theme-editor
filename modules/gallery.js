@@ -145,12 +145,36 @@ function defaults() {
         tagsHide: false, tagColor: '', tagBg: '', tagBorder: '', tagRadius: 0, tagSize: 0,
         /* персоны */
         personaOn: false, personaLayout: 'stack', personaMinW: 120, personaGap: 10, personaRadius: 12, personaRing: 0, personaRingColor: '',
+        personaShape: 'rounded', personaRingStyle: 'solid', personaFocusY: 0,
         /* быстрые аватарки */
         quickOn: false, quickSize: 0, quickRadius: 0, quickRing: 0, quickRingColor: '', hideScroll: false,
+        quickShape: '', quickRingStyle: 'solid',
         // расстояние: телефон → ПК; выравнивание; что делать, если не помещаются
         quickGapMin: 0, quickGapMax: 0, quickAlign: '', quickFit: '', quickMinSize: 32,
     };
 }
+
+/* Формы аватарок — только скругление углов: без масок и картинок, легко.
+   Обводка (outline) идёт по той же форме */
+const SHAPES = [
+    ['', 'как в теме'], ['circle', 'круг'], ['rounded', 'скруглённый квадрат'], ['square', 'квадрат'],
+    ['leaf', 'лист'], ['drop', 'капля'], ['arch', 'арка'],
+];
+const SHAPE_R = { circle: '50%', square: '0', leaf: '50% 0', drop: '50% 50% 50% 0', arch: '50% 50% 0 0' };
+const LINES = [['solid', 'сплошная'], ['dashed', 'пунктир'], ['dotted', 'точки'], ['double', 'двойная']];
+
+function shapeRadius(shape, px) {
+    if (shape === 'rounded') return px ? `${px}px` : '';
+    return SHAPE_R[shape] || '';
+}
+function readShape(v) {
+    if (!v) return { shape: '', radius: 0 };
+    const k = Object.keys(SHAPE_R).find(x => SHAPE_R[x] === v);
+    if (k) return { shape: k, radius: 0 };
+    const m = v.match(/^(\d+(?:\.\d+)?)px$/);
+    return m ? { shape: 'rounded', radius: Math.round(+m[1]) } : { shape: '', radius: 0 };
+}
+const RING_RE = /^(\d+(?:\.\d+)?)px\s+(solid|dashed|dotted|double)\s+(.+)$/;
 
 /** Расстояние «телефон → ПК» */
 function fluidGap(a, b) {
@@ -216,15 +240,25 @@ function readState() {
     const pw = get(SEL.persona, 'grid-template-columns').match(/minmax\((\d+)px/);
     if (pw) s.personaMinW = +pw[1];
     s.personaGap = num(get(SEL.persona, 'gap')) || s.personaGap;
-    s.personaRadius = num(get(SEL.personaAv, 'border-radius'));
-    const pr = get(SEL.personaAv, 'outline').match(/^(\d+(?:\.\d+)?)px\s+solid\s+(.+)$/);
-    if (pr) { s.personaRing = +pr[1]; s.personaRingColor = pr[2]; }
+    {
+        const sh = readShape(get(SEL.personaAv, 'border-radius'));
+        s.personaShape = sh.shape;
+        s.personaRadius = sh.radius || s.personaRadius;
+    }
+    const pr = get(SEL.personaAv, 'outline').match(RING_RE);
+    if (pr) { s.personaRing = +pr[1]; s.personaRingStyle = pr[2]; s.personaRingColor = pr[3] === 'currentColor' ? '' : pr[3]; }
+    const pf = get(SEL.personaImg, 'object-position').match(/(\d+)%\s*$/);
+    if (pf) s.personaFocusY = +pf[1];
 
     s.quickSize = num(get(SEL.quick, 'width'));
     s.quickOn = !!s.quickSize || !!get(SEL.quick, 'border-radius');
-    s.quickRadius = num(get(SEL.quick, 'border-radius'));
-    const qr = get(SEL.quick, 'outline').match(/^(\d+(?:\.\d+)?)px\s+solid\s+(.+)$/);
-    if (qr) { s.quickRing = +qr[1]; s.quickRingColor = qr[2]; }
+    {
+        const sh = readShape(get(SEL.quick, 'border-radius'));
+        s.quickShape = sh.shape;
+        s.quickRadius = sh.radius;
+    }
+    const qr = get(SEL.quick, 'outline').match(RING_RE);
+    if (qr) { s.quickRing = +qr[1]; s.quickRingStyle = qr[2]; s.quickRingColor = qr[3] === 'currentColor' ? '' : qr[3]; }
     s.hideScroll = SCROLLERS.some(k => get(k, 'scrollbar-width') === 'none') || get(OLD_WRAP, 'scrollbar-width') === 'none';
     const g = String(get(SEL.hot, 'gap'));
     const gm = g.match(/^clamp\(\s*(\d+)px.*,\s*(\d+)px\s*\)$/) || g.match(/^((\d+))px$/);
@@ -350,21 +384,22 @@ function buildRules(s) {
     put(SEL.personaAv, 'height', per ? 'auto' : '');
     put(SEL.personaAv, 'flex', stack ? '0 0 auto' : '');
     put(SEL.personaAv, 'aspect-ratio', per ? '1 / 1' : '');
-    put(SEL.personaAv, 'border-radius', per && s.personaRadius ? `${s.personaRadius}px` : '');
+    put(SEL.personaAv, 'border-radius', per ? shapeRadius(s.personaShape, s.personaRadius) : '');
     put(SEL.personaAv, 'overflow', per ? 'hidden' : '');
-    put(SEL.personaAv, 'outline', per && s.personaRing && s.personaRingColor ? `${s.personaRing}px solid ${s.personaRingColor}` : '');
+    // Без выбранного цвета — цвет текста: иначе толщина терялась
+    put(SEL.personaAv, 'outline', per && s.personaRing ? `${s.personaRing}px ${s.personaRingStyle || 'solid'} ${s.personaRingColor || 'currentColor'}` : '');
     put(SEL.personaImg, 'width', per ? '100%' : '');
     put(SEL.personaImg, 'height', per ? '100%' : '');
     put(SEL.personaImg, 'object-fit', per ? 'cover' : '');
-    put(SEL.personaImg, 'object-position', per ? 'center top' : '');
+    put(SEL.personaImg, 'object-position', per ? (s.personaFocusY ? `center ${s.personaFocusY}%` : 'center top') : '');
     put(SEL.personaImg, 'border-radius', per ? 'inherit' : '');
 
     /* ---------- быстрые аватарки ---------- */
     const q = on && s.quickOn;
     put(SEL.quick, 'width', q && s.quickSize ? `${s.quickSize}px` : '');
     put(SEL.quick, 'height', q && s.quickSize ? `${s.quickSize}px` : '');
-    put(SEL.quick, 'border-radius', q && s.quickRadius ? `${s.quickRadius}px` : '');
-    put(SEL.quick, 'outline', q && s.quickRing && s.quickRingColor ? `${s.quickRing}px solid ${s.quickRingColor}` : '');
+    put(SEL.quick, 'border-radius', q ? shapeRadius(s.quickShape, s.quickRadius) : '');
+    put(SEL.quick, 'outline', q && s.quickRing ? `${s.quickRing}px ${s.quickRingStyle || 'solid'} ${s.quickRingColor || 'currentColor'}` : '');
     put(SEL.quickImg, 'width', q ? '100%' : '');
     put(SEL.quickImg, 'height', q ? '100%' : '');
     put(SEL.quickImg, 'object-fit', q ? 'cover' : '');
@@ -577,17 +612,23 @@ function render() {
             state.personaOn ? row('Раскладка', select('personaLayout', [['stack', 'стопкой: фото слева, текст справа'], ['grid', 'сеткой-плитками']], render)) : null,
             state.personaOn ? row(state.personaLayout === 'grid' ? 'Ширина плитки' : 'Размер аватарки', slider('personaMinW', 70, 400, 'px', '120px')) : null,
             state.personaOn ? row('Промежуток', slider('personaGap', 0, 40, 'px', '10px')) : null,
-            state.personaOn ? row('Скругление', slider('personaRadius', 0, 50, 'px', 'нет')) : null,
+            state.personaOn ? row('Форма', select('personaShape', SHAPES, render)) : null,
+            state.personaOn && state.personaShape === 'rounded' ? row('Скругление', slider('personaRadius', 0, 50, 'px', 'нет')) : null,
+            state.personaOn ? row('Видимая часть фото', slider('personaFocusY', 0, 100, '%', 'сверху'),
+                'Какую часть картинки показывать: 0% — верх, 50% — середину, 100% — низ') : null,
             state.personaOn ? row('Обводка', slider('personaRing', 0, 8, 'px', 'нет')) : null,
-            state.personaOn ? row('Цвет обводки', colorBtn('personaRingColor', 'выбрать')) : null,
+            state.personaOn && state.personaRing ? row('Линия', select('personaRingStyle', LINES)) : null,
+            state.personaOn && state.personaRing ? row('Цвет обводки', colorBtn('personaRingColor', 'цвет текста')) : null,
         ]),
 
         group('quick', 'Hot-swap (избранные персонажи)', [
             check('quickOn', 'Настроить Hot-swap'),
             state.quickOn ? row('Размер', slider('quickSize', 0, 140, 'px', 'как в теме')) : null,
-            state.quickOn ? row('Скругление', slider('quickRadius', 0, 50, 'px', 'как в теме')) : null,
+            state.quickOn ? row('Форма', select('quickShape', SHAPES, render)) : null,
+            state.quickOn && state.quickShape === 'rounded' ? row('Скругление', slider('quickRadius', 0, 50, 'px', 'нет')) : null,
             state.quickOn ? row('Обводка', slider('quickRing', 0, 6, 'px', 'нет')) : null,
-            state.quickOn ? row('Цвет обводки', colorBtn('quickRingColor', 'выбрать')) : null,
+            state.quickOn && state.quickRing ? row('Линия', select('quickRingStyle', LINES)) : null,
+            state.quickOn && state.quickRing ? row('Цвет обводки', colorBtn('quickRingColor', 'цвет текста')) : null,
             state.quickOn ? pair('Расстояние между аватарками', 'quickGapMin', 'quickGapMax', 60,
                 'Первое — на телефоне, второе — на ПК, между ними плавно. Если задано — не меняется от числа персонажей') : null,
             state.quickOn ? row('Выравнивание', select('quickAlign', [['', 'по центру'], ['start', 'по левому краю'], ['even', 'растянуть поровну (как в ST)']])) : null,
@@ -659,7 +700,7 @@ function slider(key, min, max, unit, zeroText, hint) {
         title: hint || '',
         on: {
             input: (e) => { state[key] = +e.target.value; state.on = true; show(); preview(); },
-            change: () => commit(),
+            change: () => { commit(); if (/Ring$/.test(key)) render(); },
         },
     });
     show();

@@ -68,6 +68,13 @@ const SEL = {
     ta: '#send_textarea',
     ph: '#send_textarea::placeholder',
 };
+/* Кнопки расширений — всё в колонках кнопок, кроме кнопок самой ST.
+   Проверка id у каждого ребёнка колонки — дешёвая */
+const ST_KIDS = '#options_button, #extensionsMenuButton, #mes_impersonate, #mes_continue, #send_but, #mes_stop, #stscript_continue, #stscript_pause, #stscript_stop, #file_form';
+const EXT = `:is(#leftSendForm, #rightSendForm) > :not(${ST_KIDS})`;
+// Значок внутри кнопки расширения: <i>, картинка, svg или что-то с классом fa-…
+const EXT_IC = `${EXT} :is(i, svg, img, [class*="fa-"])`;
+const EXT_IMG = `${EXT} :is(svg, img)`;   // картинки — ровно в размер значка
 /* Условие, при котором ST сама сужает боковые колонки (mobile-styles.css) */
 const NARROW = '@media screen and (max-width: 450px)';
 const COND_SEP = '\u0001';
@@ -139,7 +146,8 @@ function defaults() {
         iconMin: 0, iconMax: 0, blockPad: 0,
         bColor: '', bOp: 0, bHover: 0, bBg: '', bShape: '', bRing: 0, bRingColor: '', bGap: 0, bNoGlow: false,
         glyphs: {},
-        glyphSel: {},      // id → селектор значка для кнопок расширений, найденных в теме
+        glyphSel: {},
+        extFit: false, extScale: 0,   // подогнать кнопки расширений под кнопки ST      // id → селектор значка для кнопок расширений, найденных в теме
         // поле ввода
         taColor: '', taMin: 0, taMax: 0, taBg: '', taRadius: 0, taRing: 0, taRingColor: '',
         // своя надпись
@@ -245,6 +253,10 @@ function readState() {
         if (c) s.glyphs[cls] = { code: c[1].toLowerCase(), brand: /Brands/i.test(get(sel, 'font-family')) };
     }
 
+    s.extFit = get(EXT, 'width') === 'var(--bottomFormBlockSize)';
+    const es = get(EXT, 'font-size').match(/^calc\(var\(--bottomFormIconSize\) \* ([\d.]+)\)$/);
+    s.extScale = es ? Math.round(+es[1] * 100) : 0;
+
     // поле ввода
     s.taColor = get(SEL.ta, 'color');
     const tf = readFluid(get(SEL.ta, 'font-size')); s.taMin = tf.min; s.taMax = tf.max;
@@ -336,6 +348,37 @@ function buildRules(s) {
         put(sel, 'width', img ? '1em' : '');
         put(sel, 'height', img ? '1em' : '');
     }
+
+    /* ---------- кнопки расширений: как у ST ----------
+       Расширения делают кнопки по-разному: <button> с отступами,
+       <span> без размера, значок во вложенном <i> со своим размером.
+       Даём им тот же квадрат, что у кнопок ST, и ставим по центру колонки.
+       display не трогаем: кнопки расширений прячут себя сами */
+    const fit = on && s.extFit;
+    put(EXT, 'width', fit ? 'var(--bottomFormBlockSize)' : '');
+    put(EXT, 'height', fit ? 'var(--bottomFormBlockSize)' : '');
+    put(EXT, 'min-width', fit ? '0' : '');
+    put(EXT, 'min-height', fit ? '0' : '');
+    put(EXT, 'margin', fit ? '0' : '');
+    put(EXT, 'padding', fit ? '0' : '');
+    put(EXT, 'box-sizing', fit ? 'border-box' : '');
+    put(EXT, 'align-self', fit ? 'center' : '');
+    put(EXT, 'align-items', fit ? 'center' : '');
+    put(EXT, 'justify-content', fit ? 'center' : '');
+    put(EXT, 'text-align', fit ? 'center' : '');
+    put(EXT, 'line-height', fit ? 'var(--bottomFormBlockSize)' : '');
+    put(EXT, 'vertical-align', fit ? 'middle' : '');
+    put(EXT, 'font-size', fit ? (s.extScale && s.extScale !== 100 ? `calc(var(--bottomFormIconSize) * ${r2(s.extScale / 100)})` : 'var(--bottomFormIconSize)') : '');
+    // Значок внутри — размером с кнопку ST, без своих отступов
+    put(EXT_IC, 'font-size', fit ? '1em' : '');
+    put(EXT_IC, 'line-height', fit ? '1' : '');
+    put(EXT_IC, 'margin', fit ? '0' : '');
+    put(EXT_IC, 'vertical-align', fit ? 'middle' : '');
+    put(EXT_IC, 'max-width', fit ? '1em' : '');
+    put(EXT_IC, 'max-height', fit ? '1em' : '');
+    put(EXT_IMG, 'width', fit ? '1em' : '');
+    put(EXT_IMG, 'height', fit ? '1em' : '');
+    put(EXT_IMG, 'object-fit', fit ? 'contain' : '');
 
     /* ---------- поле ввода ---------- */
     put(SEL.ta, 'color', on ? s.taColor : '');
@@ -517,6 +560,8 @@ function extRows() {
     const list = glyphList(state).filter(([cls]) => isExt(cls));
     return [
         h('small.vte-note', { text: 'Кнопки, которые добавили в панель расширения. Новые находятся сами, когда расширение включено.' }),
+        check('extFit', 'Подогнать под остальные кнопки', 'Тот же размер кнопки и значка, что у кнопок SillyTavern, и ровно по центру'),
+        state.extFit ? row('Размер значков', slider('extScale', 50, 150, '%', 'как у остальных'), 'Если значок расширения всё равно кажется мельче или крупнее') : null,
         ...list.map(([cls, label]) => {
             const here = !!document.getElementById(cls);
             return glyphRow(cls, here ? label : `${label} (сейчас нет в панели)`);

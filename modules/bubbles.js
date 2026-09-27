@@ -63,12 +63,25 @@ const S = {
     link: (r) => `${base(r)} .mes_text a`,          // бывшая настройка «Ссылки» — только стереть
     quote: (r) => `${base(r)} .mes_text blockquote`,
     hr: (r) => `${base(r)} .mes_text hr`,
+    // вид разметки
+    q: (r) => `${base(r)} .mes_text q`,
+    em: (r) => `${base(r)} .mes_text em`,
+    emB: (r) => `${base(r)} .mes_text em::before`,
+    u: (r) => `${base(r)} .mes_text u`,
+    quoteB: (r) => `${base(r)} .mes_text blockquote::before`,
+    code: (r) => `${base(r)} .mes_text :not(pre) > code`,
+    hrA: (r) => `${base(r)} .mes_text hr::after`,
+    para: (r) => `${base(r)} .mes_text p`,
     // кнопки
     btns: (r) => `${base(r)} .mes_buttons`,
     btnAll: (r) => `${base(r)} :is(.mes_button, .extraMesButtons > div)`,
     btnHover: (r) => `${base(r)} :is(.mes_button, .extraMesButtons > div):hover`,
     btnRows: (r) => `${base(r)} :is(.mes_buttons, .extraMesButtons)`,
     edit: (r) => `${base(r)} .mes_edit_buttons`,
+    // панель «…»: сама панель и её кнопки — сильнее общих правил кнопок
+    extra: (r) => `${base(r)} .mes_buttons .extraMesButtons`,
+    exBtn: (r) => `${base(r)} .extraMesButtons > .mes_button`,
+    exHover: (r) => `${base(r)} .extraMesButtons > .mes_button:hover`,
     editBtn: (r) => `${base(r)} .mes_edit_buttons .menu_button`,
     nameBox: (r) => `${base(r)} .ch_name > .flex1`,
     // пузырь: #chat — чтобы надёжно перекрыть и тему, и «Аватарки»
@@ -119,18 +132,7 @@ function blockPadLeft(r) {
     } catch { return 10; }
 }
 
-/* Декор по бокам чата. Полоса со значками панелей (#top-settings-holder)
-   в ST ровно той же ширины, что и чат (--sheldWidth; на телефоне у обоих
-   весь экран), и уже служит опорой (position: relative). Её ::before и
-   ::after свободны — ни ST, ни другие окна их не используют. Картинки
-   держатся за левый и правый край чата: меняешь ширину чата — едут вместе
-   с ним. Размеры в vw: при масштабе браузера (Ctrl +/−) не меняются. */
-const DECOR = { L: '#top-settings-holder::before', R: '#top-settings-holder::after' };
-/* Начальные значения — как в примере темы (левая и правая «записка») */
-const DECOR_START = {
-    L: { w: 13, h: 33, x: -12, y: 15 },
-    R: { w: 78, h: 27, x: 44, y: 35 },
-};
+/* Декор по бокам чата переехал в окно «Декор» (decor.js) */
 
 /* Условия для полосы прокрутки. Телефон — сенсорный экран без мыши,
    ПК — есть мышь: так узкое окно браузера на ПК не примут за телефон */
@@ -205,33 +207,38 @@ function iconBtn(faName, title, onClick, extra) {
    СОСТОЯНИЕ
 ============================================================ */
 /* Поля, которые бывают разными у бота и у пользователя, по разделам */
-function decorDefaults(side) {
-    const st = DECOR_START[side];
-    return {
-        [`d${side}img`]: '', [`d${side}w`]: st.w, [`d${side}h`]: st.h, [`d${side}x`]: st.x, [`d${side}y`]: st.y,
-        [`d${side}op`]: 100, [`d${side}flip`]: false, [`d${side}front`]: false,
-    };
-}
-
 const ROLE_GROUPS = {
-    bubble: ['bg', 'bw', 'bc', 'radius', 'padT', 'padB', 'padX', 'maxW', 'fsMin', 'fsMax'],
-    colors: ['cText', 'cEm', 'cStrong', 'cQuote', 'cU', 'bqText', 'bqBar', 'bqBarW', 'bqBg', 'hrColor', 'hrStyle', 'hrThick', 'hrOp'],
-    text: ['textFull', 'offY', 'offX', 'textW', 'textAlign'],
+    bubble: ['bg', 'bw', 'bc', 'radius', 'padT', 'padB', 'padX', 'maxW', 'fsMin', 'fsMax', 'trimT', 'trimB'],
+    colors: ['cText', 'cEm', 'cStrong', 'cQuote', 'cU', 'bqText', 'bqBar', 'bqBarW', 'bqBg', 'hrColor', 'hrStyle', 'hrThick', 'hrOp',
+        'qStyle', 'emStyle', 'strongStyle', 'uStyle', 'bqStyle', 'codeStyle',
+        'qAcc', 'qFill', 'emAcc', 'emFill', 'strongAcc', 'strongFill', 'uAcc', 'uFill', 'bqAcc', 'bqFill', 'codeAcc', 'codeFill',
+        'hrSign', 'hrSignColor'],
+    text: ['textFull', 'offY', 'offX', 'textW', 'textAlign', 'tLh', 'tPGap', 'tIndent', 'tLetter', 'tHyph', 'tNoShadow'],
     names: ['nameCorner', 'nameX', 'nameY', 'datePos', 'dateX', 'dateY', 'nameSize', 'nameColor', 'nameNoWrap', 'nameWidth', 'dateSize', 'dateColor'],
     buttons: ['btnTop', 'btnPlace', 'btnCorner', 'btnXMin', 'btnXMax', 'btnYMin', 'btnYMax', 'btnDir',
         'btnSMin', 'btnSMax', 'btnColor', 'btnOpacity', 'btnHover', 'btnBg', 'btnRadius', 'btnPad', 'btnGap', 'btnNoShadow',
-        'edPlace', 'edCorner', 'edXMin', 'edXMax', 'edYMin', 'edYMax', 'edSize', 'edOpacity', 'edRadius', 'edGap'],
+        'edPlace', 'edCorner', 'edXMin', 'edXMax', 'edYMin', 'edYMax', 'edSize', 'edOpacity', 'edRadius', 'edGap',
+        'exOwn', 'exXMin', 'exXMax', 'exYMin', 'exYMax', 'exDir', 'exSMin', 'exSMax', 'exColor', 'exOpacity', 'exHover', 'exBg', 'exRadius', 'exPad', 'exGap', 'edSame', 'edColor', 'edBg', 'btnPanBg', 'btnPanPad', 'btnPanBw', 'btnPanBs', 'btnPanBc', 'btnPanRad', 'exPanBg', 'exPanPad', 'exPanBw', 'exPanBs', 'exPanBc', 'exPanRad', 'edPanBg', 'edPanPad', 'edPanBw', 'edPanBs', 'edPanBc', 'edPanRad'],
 };
 const GROUP_OF = Object.fromEntries(Object.entries(ROLE_GROUPS).flatMap(([g, keys]) => keys.map(k => [k, g])));
 
 function roleDefaults() {
     return {
         bg: '', bw: 0, bc: '', radius: 0, padT: 0, padB: 0, padX: 0, maxW: 0, fsMin: 0, fsMax: 0,
+        trimT: 0, trimB: 0,   // фон пузыря короче сверху / снизу (сам пузырь и текст не двигаются)
+        // текст целиком: межстрочный (×100), между абзацами (px), красная строка (×10 em),
+        // межбуквенный (×100 em), переносы, без тени
+        tLh: 0, tPGap: 0, tIndent: 0, tLetter: 0, tHyph: false, tNoShadow: false,
         cText: '', cEm: '', cStrong: '', cQuote: '', cU: '',
         // цитата (> текст): текст, полоса слева, её толщина, фон
         bqText: '', bqBar: '', bqBarW: 0, bqBg: '',
         // горизонтальная линия (---): цвет, вид, толщина, видимость
         hrColor: '', hrStyle: '', hrThick: 0, hrOp: 0,
+        // вид разметки: готовые шаблоны для кавычек, курсива, жирного и т.д.
+        qStyle: '', emStyle: '', strongStyle: '', uStyle: '', bqStyle: '', codeStyle: '',
+        // цвета шаблонов: Acc — линии и рамки, Fill — подложка
+        qAcc: '', qFill: '', emAcc: '', emFill: '', strongAcc: '', strongFill: '', uAcc: '', uFill: '', bqAcc: '', bqFill: '', codeAcc: '', codeFill: '',
+        hrSign: '', hrSignColor: '',  // знак посередине линии (---)
         offY: 0, offX: 0,
         textFull: false,   // текст во всю ширину пузыря (без запаса ST под стрелки)
         textW: 0,          // ширина текста, % от пузыря (0 — как в теме)
@@ -249,7 +256,44 @@ function roleDefaults() {
         btnNoShadow: false,
         edPlace: '', edCorner: 'top-right', edXMin: 0, edXMax: 0, edYMin: 0, edYMax: 0,
         edSize: 0, edOpacity: 0, edRadius: 0, edGap: 0,
+        // панель «…» (дополнительные кнопки): exOwn — своя, не как у основных
+        exOwn: false, exXMin: 0, exXMax: 0, exYMin: 0, exYMax: 0, exDir: '',
+        exSMin: 0, exSMax: 0, exColor: '', exOpacity: 0, exHover: 0, exBg: '', exRadius: 0, exPad: 0, exGap: 0,
+        // кнопки правки: edSame — цвет, фон и видимость как у основных
+        edSame: false, edColor: '', edBg: '',
+        // подложка под группой кнопок (btn — основные, ex — «…», ed — правка)
+        ...panDefaults('btn'), ...panDefaults('ex'), ...panDefaults('ed'),
     };
+}
+
+/* Подложка под группой кнопок: фон чуть больше кнопок (отступ + такой же
+   отрицательный margin — кнопки не сдвигаются) и рамка любого вида */
+function panDefaults(pre) {
+    return { [`${pre}PanBg`]: '', [`${pre}PanPad`]: 0, [`${pre}PanBw`]: 0, [`${pre}PanBs`]: '', [`${pre}PanBc`]: '', [`${pre}PanRad`]: 0 };
+}
+const LINE_STYLES = [['', 'сплошная'], ['dashed', 'пунктир'], ['dotted', 'точки'], ['double', 'двойная']];
+
+function panRules(put, sel, v, pre) {
+    const bg = v?.[`${pre}PanBg`] || '';
+    const pad = v?.[`${pre}PanPad`] || 0;
+    const bw = v?.[`${pre}PanBw`] || 0;
+    put(sel, 'background-color', bg);
+    put(sel, 'padding', pad ? `${pad}px` : '');
+    put(sel, 'margin', pad ? `-${pad}px` : '');
+    put(sel, 'border', bw ? `${bw}px ${v[`${pre}PanBs`] || 'solid'} ${v[`${pre}PanBc`] || 'currentColor'}` : '');
+    put(sel, 'border-radius', v?.[`${pre}PanRad`] ? `${v[`${pre}PanRad`]}px` : '');
+}
+
+function panRead(get, sel, pre) {
+    const o = {};
+    o[`${pre}PanBg`] = get(sel, 'background-color');
+    o[`${pre}PanPad`] = num(get(sel, 'padding'));
+    const b = get(sel, 'border').match(/^(\d+)px\s+(solid|dashed|dotted|double)\s+(.+)$/);
+    o[`${pre}PanBw`] = b ? +b[1] : 0;
+    o[`${pre}PanBs`] = b && b[2] !== 'solid' ? b[2] : '';
+    o[`${pre}PanBc`] = b && b[3] !== 'currentColor' ? b[3] : '';
+    o[`${pre}PanRad`] = num(get(sel, 'border-radius'));
+    return o;
 }
 
 function defaults() {
@@ -276,9 +320,26 @@ function defaults() {
         sbWhere: 'both',   // где менять вид: both | pc | phone
         sbW: 0, sbThumb: '', sbTrack: '', sbRadius: 0, sbImg: '', sbFit: 'stretch',
 
-        // декор по бокам чата: слева (dL…) и справа (dR…), всё в vw
-        ...decorDefaults('L'), ...decorDefaults('R'),
+
+        // фон чата под пузырями
+        cNoBlur: false, cColor: '', cOp: 100,
+        cImg: '', cImgOp: 100, cFit: 'cover', cPos: 'center',
     };
+}
+
+function captureBubble() {
+    try {
+        const t = state.target;
+        const q = state.link.bubble ? '' : `[is_user="${state.role === 'user'}"]`;
+        const m = document.querySelector(`#chat .mes${q}:not(.smallSysMes)`);
+        const el = m && (t === 'mes' ? m : m.querySelector(t === 'text' ? '.mes_text' : '.mes_block'));
+        if (!el) return;
+        const cs = getComputedStyle(el);
+        const clear = (c) => !c || c === 'transparent' || /rgba\([^)]*,\s*0\)$/.test(c);
+        if (!val('bg') && !clear(cs.backgroundColor)) setVal('bg', cs.backgroundColor);
+        const bw = Math.round(parseFloat(cs.borderTopWidth) || 0);
+        if (!val('bw') && bw && cs.borderTopStyle !== 'none') { setVal('bw', bw); setVal('bc', cs.borderTopColor); }
+    } catch {}
 }
 
 /** Текущее значение поля: для раздела бот/пользователь — из нужной вкладки */
@@ -289,6 +350,9 @@ function val(key) {
 }
 
 function setVal(key, v) {
+    // Обрезка фона: фон и рамка темы переезжают в слой за текстом — берём
+    // их с живого пузыря, если своих ещё нет (видно в окне, можно поменять)
+    if ((key === 'trimT' || key === 'trimB') && v && !val('trimT') && !val('trimB')) captureBubble();
     const g = GROUP_OF[key];
     state.on = true;
     if (!g) { state[key] = v; return; }
@@ -346,10 +410,14 @@ const tr = (v) => {
 const READ = {
     bubble(get, r, t) {
         const box = S.box(r, t);
-        const bd = get(box, 'border').match(/^(\d+(?:\.\d+)?)px\s+solid\s+(.+)$/);
+        const A = `${box}::after`;
+        const trimmed = get(box, 'isolation') === 'isolate' && !!get(A, 'content');
+        const bd = get(trimmed ? A : box, 'border').match(/^(\d+(?:\.\d+)?)px\s+solid\s+(.+)$/);
         const fs = readFluid(get(S.text(r), 'font-size'));
         return {
-            bg: get(box, 'background-color'),
+            bg: get(trimmed ? A : box, 'background-color'),
+            trimT: trimmed ? num(get(A, 'top')) : 0,
+            trimB: trimmed ? num(get(A, 'bottom')) : 0,
             bw: bd ? +bd[1] : 0, bc: bd && bd[2] !== 'currentColor' ? bd[2] : '',
             radius: num(get(box, 'border-radius')),
             padT: num(get(box, 'padding-top')), padB: num(get(box, 'padding-bottom')),
@@ -373,6 +441,9 @@ const READ = {
             hrStyle: get(S.hr(r), '--vte-hr-style'),
             hrThick: num(get(S.hr(r), '--vte-hr-thick')),
             hrOp: Math.round((parseFloat(get(S.hr(r), 'opacity')) || 0) * 100),
+            hrSign: get(S.hr(r), '--vte-hr-sign'),
+            hrSignColor: (() => { const c = get(S.hrA(r), 'color'); return c && c !== (get(S.hr(r), '--vte-hr-color') || 'currentColor') ? c : ''; })(),
+            ...readTextStyles(get, r),
         };
     },
     text(get, r) {
@@ -386,6 +457,12 @@ const READ = {
             offX: num(get(S.text(r), 'left') || (ta || w ? '' : get(S.text(r), 'margin-left'))),
             textW: w ? +w[1] : 0,
             textAlign: ({ left: 'left', center: 'center', right: 'right', justify: 'justify' })[ta] || '',
+            tLh: Math.round((parseFloat(get(S.text(r), 'line-height')) || 0) * 100),
+            tPGap: num(get(S.para(r), 'margin-bottom')),
+            tIndent: Math.round((parseFloat(get(S.para(r), 'text-indent')) || 0) * 10),
+            tLetter: Math.round((parseFloat(get(S.text(r), 'letter-spacing')) || 0) * 100),
+            tHyph: get(S.text(r), 'hyphens') === 'auto',
+            tNoShadow: get(S.text(r), 'text-shadow') === 'none',
         };
     },
     buttons(get, r) {
@@ -421,7 +498,32 @@ const READ = {
             edOpacity: Math.round((parseFloat(get(S.editBtn(r), 'opacity')) || 0) * 100),
             edRadius: num(get(S.editBtn(r), 'border-radius')),
             edGap: num(get(S.edit(r), 'column-gap')),
+            ...panRead(get, S.btns(r), 'btn'),
+            ...panRead(get, S.extra(r), 'ex'),
+            ...panRead(get, S.edit(r), 'ed'),
         };
+        // панель «…»: своё — если есть хоть одно её правило
+        const exf = readFluid(get(S.exBtn(r), 'font-size'));
+        const ex = {
+            exSMin: exf.min, exSMax: exf.max,
+            exColor: get(S.exBtn(r), 'color'),
+            exOpacity: Math.round((parseFloat(get(S.exBtn(r), 'opacity')) || 0) * 100),
+            exHover: Math.round((parseFloat(get(S.exHover(r), 'opacity')) || 0) * 100),
+            exBg: get(S.exBtn(r), 'background-color'),
+            exRadius: num(get(S.exBtn(r), 'border-radius')),
+            exPad: num(get(S.exBtn(r), 'padding')),
+            exGap: num(get(S.extra(r), 'gap')),
+            exDir: get(S.extra(r), 'flex-direction'),
+        };
+        [ex.exXMin, ex.exXMax] = readSigned(get(S.extra(r), 'left'));
+        [ex.exYMin, ex.exYMax] = readSigned(get(S.extra(r), 'top'));
+        ex.exOwn = get(S.extra(r), '--vte-own') === '1';
+        Object.assign(o, ex);
+        o.edSame = get(S.editBtn(r), '--vte-same') === '1';
+        if (!o.edSame) {
+            o.edColor = get(S.editBtn(r), 'color');
+            o.edBg = get(S.editBtn(r), 'background-color');
+        }
         return o;
     },
     names(get, r) {
@@ -449,6 +551,157 @@ const READ = {
 };
 
 const isEmpty = (o) => Object.entries(o).every(([k, v]) => !v || /^(btn|ed)Corner$/.test(k));
+
+/* ---------- фон чата под пузырями ----------
+   #chat — лента сообщений; её фон ST красит в --SmartThemeChatTintColor
+   и размывает обои под ней (backdrop-filter).
+   Своя картинка — слой #sheld::after под лентой (#sheld — колонка чата,
+   лента в ней выше: z-index 30). Картинка не прокручивается вместе с
+   сообщениями и не перерисовывается при прокрутке. Когда картинка есть,
+   фон ленты переезжает ещё ниже — в #sheld::before: так картинка ложится
+   поверх фона, но под сообщения */
+const CHAT = '#chat';
+const CH_TINT = '#sheld::before';
+const CH_IMG = '#sheld::after';
+const CH_VAR = 'var(--SmartThemeChatTintColor)';
+
+function chatTint(s) {
+    const c = s.cColor || '';
+    const op = s.cOp ?? 100;
+    if (op >= 100) return c;
+    return `color-mix(in srgb, ${c || CH_VAR} ${op}%, transparent)`;
+}
+
+function readChatTint(v) {
+    const m = String(v || '').match(/^color-mix\(in srgb,\s*(.+?)\s+(\d+(?:\.\d+)?)%,\s*transparent\)$/);
+    const col = (x) => (x === CH_VAR ? '' : x);
+    return m ? { cColor: col(m[1]), cOp: Math.round(+m[2]) } : { cColor: col(v || ''), cOp: 100 };
+}
+
+/* ============================================================
+   ВИД РАЗМЕТКИ — готовые шаблоны
+   Всё неподвижное и лёгкое: подчёркивания, заливки цветом, тонкие рамки,
+   «маркер» — внутренняя тень без размытия. Без анимаций, градиентов и
+   размытых теней. Цвет — от цвета самого элемента (currentColor), поэтому
+   шаблон подходит к любой теме и к цветам выше.
+   Каждый шаблон помечает правило: --vte-st: имя — так окно узнаёт его обратно.
+============================================================ */
+const mix = (p) => `color-mix(in srgb, currentColor ${p}%, transparent)`;
+/* Цвета шаблона — переменные на самом элементе: --vte-ta (линии, рамки)
+   и --vte-tb (подложка). Не заданы — берётся полупрозрачный цвет текста */
+const ACC = (p) => `var(--vte-ta, ${mix(p)})`;
+const FILL = (p) => `var(--vte-tb, ${mix(p)})`;
+const CLONE = { 'box-decoration-break': 'clone', '-webkit-box-decoration-break': 'clone' };
+/* [подпись, правила, правила ::before, есть ли подложка] */
+const TEXT_STYLES = {
+    q: {
+        title: '«Кавычки»',
+        list: {
+            pill: ['плашка-таблетка', { ...CLONE, 'background-color': FILL(16), 'border-radius': '999px', padding: '0.05em 0.45em', 'box-shadow': `0 0 0 1px ${ACC(30)}` }, null, true],
+            wavy: ['волнистое подчёркивание', { 'text-decoration-line': 'underline', 'text-decoration-style': 'wavy', 'text-decoration-color': ACC(70), 'text-decoration-thickness': '1px', 'text-underline-offset': '3px' }],
+            frame: ['рамка пунктиром', { ...CLONE, border: `1px dashed ${ACC(60)}`, 'border-radius': '6px', padding: '0 0.3em', 'background-color': FILL(0) }, null, true],
+            italic: ['курсивом', { 'font-style': 'italic' }],
+        },
+    },
+    em: {
+        title: '*Курсив*',
+        list: {
+            pencil: ['прямой, волна и ✎', { 'font-style': 'normal', 'text-decoration-line': 'underline', 'text-decoration-style': 'wavy', 'text-decoration-color': ACC(60), 'text-decoration-thickness': '1px', 'text-underline-offset': '3px' },
+                { content: '"\\270E\\00a0"', opacity: '0.75', 'font-style': 'normal', color: 'var(--vte-ta, currentColor)' }],
+            wavy: ['волнистое подчёркивание', { 'text-decoration-line': 'underline', 'text-decoration-style': 'wavy', 'text-decoration-color': ACC(60), 'text-decoration-thickness': '1px', 'text-underline-offset': '3px' }],
+            dotted: ['пунктирное подчёркивание', { 'text-decoration-line': 'underline', 'text-decoration-style': 'dotted', 'text-decoration-color': ACC(70), 'text-underline-offset': '3px' }],
+            hand: ['рукописный', { 'font-family': "'Segoe Script', 'Bradley Hand', 'Comic Sans MS', cursive", 'font-style': 'normal' }],
+            soft: ['тише (чуть прозрачнее)', { opacity: '0.8' }],
+            pill: ['на подложке', { ...CLONE, 'background-color': FILL(12), 'border-radius': '5px', padding: '0 0.3em' }, null, true],
+        },
+    },
+    strong: {
+        title: '**Жирный**',
+        list: {
+            line: ['толстое подчёркивание', { 'text-decoration-line': 'underline', 'text-decoration-thickness': '2px', 'text-decoration-color': ACC(55), 'text-underline-offset': '3px' }],
+            caps: ['капителью', { 'font-variant': 'small-caps', 'letter-spacing': '0.04em' }],
+            pill: ['на подложке', { ...CLONE, 'background-color': FILL(14), 'border-radius': '5px', padding: '0 0.3em' }, null, true],
+        },
+    },
+    u: {
+        title: 'Подчёркнутый',
+        list: {
+            wavy: ['волной', { 'text-decoration-style': 'wavy', 'text-decoration-color': ACC(100), 'text-underline-offset': '3px' }],
+            dotted: ['точками', { 'text-decoration-style': 'dotted', 'text-decoration-color': ACC(100), 'text-underline-offset': '3px' }],
+            dashed: ['пунктиром', { 'text-decoration-style': 'dashed', 'text-decoration-color': ACC(100), 'text-underline-offset': '3px' }],
+            double: ['двойной линией', { 'text-decoration-style': 'double', 'text-decoration-color': ACC(100), 'text-underline-offset': '2px' }],
+        },
+    },
+    bq: {
+        title: 'Цитата  (> текст)',
+        list: {
+            card: ['карточка', { 'border-radius': '0 10px 10px 0', padding: '0.45em 0.9em', 'box-shadow': 'inset 0 0 0 100vmax var(--vte-tb, color-mix(in srgb, var(--SmartThemeQuoteColor) 10%, transparent))' }, null, true],
+            center: ['по центру между линиями', { 'border-left-style': 'none', 'border-top': `1px solid ${ACC(35)}`, 'border-bottom': `1px solid ${ACC(35)}`, 'text-align': 'center', 'font-style': 'italic', padding: '0.4em 1em' }],
+            frame: ['рамка пунктиром', { 'border-left-style': 'dashed', 'border-top': `1px dashed ${ACC(45)}`, 'border-right': `1px dashed ${ACC(45)}`, 'border-bottom': `1px dashed ${ACC(45)}`, 'border-radius': '8px', padding: '0.4em 0.8em' }],
+            mark: ['с большой кавычкой', { padding: '0.3em 0.8em' },
+                { content: '"\\201C"', 'font-size': '2.2em', 'line-height': '0', 'vertical-align': '-0.4em', 'margin-right': '0.1em', opacity: '0.5', color: 'var(--vte-ta, var(--SmartThemeQuoteColor))' }],
+        },
+    },
+    code: {
+        title: '`Код`',
+        list: {
+            chip: ['плашка с рамкой', { 'background-color': FILL(12), border: `1px solid ${ACC(30)}`, 'border-radius': '6px', padding: '0.05em 0.35em' }, null, true],
+            dashed: ['рамка пунктиром', { 'background-color': FILL(0), border: `1px dashed ${ACC(45)}`, 'border-radius': '4px', padding: '0 0.3em' }, null, true],
+            plain: ['без фона и рамки', { 'background-color': 'transparent', border: 'none', padding: '0' }],
+        },
+    },
+};
+/* Где пишется каждый вид: основной селектор и слой ::before */
+const TS_SEL = {
+    q: ['q', null], em: ['em', 'emB'], strong: ['strong', null], u: ['u', null], bq: ['quote', 'quoteB'], code: ['code', null],
+};
+const TS_KEY = { q: 'qStyle', em: 'emStyle', strong: 'strongStyle', u: 'uStyle', bq: 'bqStyle', code: 'codeStyle' };
+/* Знаки для линии: [ключ, подпись, символ в CSS] */
+const HR_SIGNS = [
+    ['heart', '♥ сердечко', '\\2665'], ['heart2', '❤ сердце', '\\2764'], ['star', '✦ звёздочка', '\\2726'],
+    ['flower', '✿ цветок', '\\273F'], ['leaf', '❦ завиток', '\\2766'], ['moon', '☾ луна', '\\263E'], ['dot', '• точка', '\\2022'],
+];
+const TS_PRE = { q: 'q', em: 'em', strong: 'strong', u: 'u', bq: 'bq', code: 'code' };
+
+/* Готовые наборы — сразу для всех видов разметки */
+const TEXT_SETS = [
+    ['soft', 'Мягкий', { q: 'pill', em: 'pencil', strong: '', u: '', bq: 'card', code: 'chip' }],
+    ['book', 'Книжный', { q: 'italic', em: 'soft', strong: 'caps', u: 'dotted', bq: 'center', code: 'plain' }],
+    ['strict', 'Строгий', { q: 'frame', em: 'dotted', strong: 'line', u: 'dashed', bq: 'center', code: 'chip' }],
+    ['air', 'Воздушный', { q: 'frame', em: 'wavy', strong: 'line', u: 'wavy', bq: 'mark', code: 'dashed' }],
+    ['clear', 'Убрать все шаблоны', { q: '', em: '', strong: '', u: '', bq: '', code: '' }],
+];
+
+function textStyleRules(put, r, v) {
+    for (const [el, def] of Object.entries(TEXT_STYLES)) {
+        const [mainK, beforeK] = TS_SEL[el];
+        const chosen = v?.[TS_KEY[el]] || '';
+        const cur = def.list[chosen];
+        const main = S[mainK](r);
+        // Пишем все свойства всех шаблонов этого вида: смена шаблона стирает прошлый
+        const props = new Set(Object.values(def.list).flatMap(x => Object.keys(x[1])));
+        for (const p of props) put(main, p, cur?.[1]?.[p] ?? '');
+        put(main, '--vte-st', cur ? chosen : '');
+        const pre = TS_PRE[el];
+        put(main, '--vte-ta', cur ? (v[`${pre}Acc`] || '') : '');
+        put(main, '--vte-tb', cur && cur[3] ? (v[`${pre}Fill`] || '') : '');
+        if (beforeK) {
+            const bProps = new Set(Object.values(def.list).flatMap(x => Object.keys(x[2] || {})));
+            for (const p of bProps) put(S[beforeK](r), p, cur?.[2]?.[p] ?? '');
+        }
+    }
+}
+
+function readTextStyles(get, r) {
+    const o = {};
+    for (const el of Object.keys(TEXT_STYLES)) {
+        const name = get(S[TS_SEL[el][0]](r), '--vte-st');
+        o[TS_KEY[el]] = TEXT_STYLES[el].list[name] ? name : '';
+        o[`${TS_PRE[el]}Acc`] = get(S[TS_SEL[el][0]](r), '--vte-ta');
+        o[`${TS_PRE[el]}Fill`] = get(S[TS_SEL[el][0]](r), '--vte-tb');
+    }
+    return o;
+}
 
 function readState() {
     const s = defaults();
@@ -525,23 +778,21 @@ function readState() {
         }
     }
 
-    /* декор по бокам чата */
-    for (const side of ['L', 'R']) {
-        const sel = DECOR[side];
-        const bg = get(sel, 'background-image').match(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s]*))\s*\)/);
-        if (!bg) continue;
-        s[`d${side}img`] = bg[1] ?? bg[2] ?? bg[3];
-        const vw = (v) => { const m = String(v).match(/(-?\d+(?:\.\d+)?)vw/); return m ? +m[1] : 0; };
-        s[`d${side}w`] = vw(get(sel, 'width'));
-        s[`d${side}h`] = vw(get(sel, 'height'));
-        const t = get(sel, 'transform').match(/translate\(\s*(-?\d+(?:\.\d+)?)vw\s*,\s*calc\(-50%\s*\+\s*(-?\d+(?:\.\d+)?)vw\)\s*\)/);
-        if (t) { s[`d${side}x`] = +t[1]; s[`d${side}y`] = +t[2]; }
-        s[`d${side}flip`] = /scaleX\(-1\)/.test(get(sel, 'transform'));
-        s[`d${side}op`] = Math.round((parseFloat(get(sel, 'opacity')) || 1) * 100);
-        s[`d${side}front`] = get(sel, 'z-index') === '5';
+    /* фон чата */
+    {
+        const u = (v) => { const m = String(v).match(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)\s]*))\s*\)/); return m ? (m[1] ?? m[2] ?? m[3]) : ''; };
+        s.cNoBlur = get(CHAT, 'backdrop-filter') === 'none';
+        s.cImg = u(get(CH_IMG, 'background-image'));
+        Object.assign(s, readChatTint(s.cImg ? get(CH_TINT, 'background-color') : get(CHAT, 'background-color')));
+        if (s.cImg) {
+            const op = get(CH_IMG, 'opacity');
+            s.cImgOp = op ? Math.round(parseFloat(op) * 100) : 100;
+            s.cFit = get(CH_IMG, 'background-repeat') === 'repeat' ? 'repeat' : get(CH_IMG, 'background-size') === 'contain' ? 'contain' : 'cover';
+            s.cPos = get(CH_IMG, 'background-position') || 'center';
+        }
     }
 
-    const any = [...rules.keys()].some(k => (/\.mes\b|scrollbar/.test(k) || k.startsWith('#top-settings-holder')) && rules.get(k)?.size);
+    const any = [...rules.keys()].some(k => (/\.mes\b|scrollbar/.test(k) || k.startsWith('#sheld') || k === CHAT) && rules.get(k)?.size);
     s.on = any;
     return s;
 }
@@ -564,13 +815,33 @@ function buildRules(s) {
     };
 
     /* ---------- пузырь ---------- */
+    const trimRel = {};
     each('bubble', (r, v) => {
         for (const t of ['block', 'mes', 'text']) {
             const box = S.box(r, t);
             const w = v && s.target === t ? v : null;
-            put(box, 'background-color', w?.bg || '');
+            /* Фон короче пузыря (сверху / снизу): фон и рамка переезжают в
+               слой ::after за текстом, а сам пузырь и текст не двигаются */
+            const trim = !!(w && (w.trimT || w.trimB));
+            const A = `${box}::after`;
+            const line = w && w.bw ? `${w.bw}px solid ${w.bc || 'currentColor'}` : '';
+            put(box, 'background-color', trim ? 'transparent' : (w?.bg || ''));
+            put(box, 'isolation', trim ? 'isolate' : '');
+            if (trim && t === 'block') trimRel[r] = true;
+            put(box, 'position', trim && t !== 'block' ? 'relative' : '');
+            put(A, 'content', trim ? '""' : '');
+            put(A, 'position', trim ? 'absolute' : '');
+            put(A, 'left', trim ? '0' : '');
+            put(A, 'right', trim ? '0' : '');
+            put(A, 'top', trim ? `${w.trimT || 0}px` : '');
+            put(A, 'bottom', trim ? `${w.trimB || 0}px` : '');
+            put(A, 'z-index', trim ? '-1' : '');
+            put(A, 'pointer-events', trim ? 'none' : '');
+            put(A, 'background-color', trim ? (w.bg || '') : '');
+            put(A, 'border', trim ? line : '');
+            put(A, 'border-radius', trim ? 'inherit' : '');
             // Цвет ещё не выбран — обводка цвета текста, толщина не теряется
-            put(box, 'border', w && w.bw ? `${w.bw}px solid ${w.bc || 'currentColor'}` : '');
+            put(box, 'border', trim ? (line ? 'none' : '') : line);
             put(box, 'border-radius', w && w.radius ? `${w.radius}px` : '');
             put(box, 'padding-top', px(w?.padT));
             put(box, 'padding-bottom', px(w?.padB));
@@ -613,15 +884,53 @@ function buildRules(s) {
         const hrOn = !!(v && (hs || v.hrColor || v.hrThick));
         const kind = hs || 'fade';
         const line = kind === 'dashed' || kind === 'dotted';
+        const sign = kind === 'sign' || kind === 'signFade';
         put(S.hr(r), '--vte-hr-color', v?.hrColor || '');
         put(S.hr(r), '--vte-hr-style', hs);
         put(S.hr(r), '--vte-hr-thick', v?.hrThick ? String(v.hrThick) : '');
-        put(S.hr(r), 'background-image', hrOn ? (kind === 'fade' ? `linear-gradient(90deg, transparent, ${hc}, transparent)` : 'none') : '');
+        /* Линия со знаком посередине: линия — фон (как у самой ST, градиент
+           с разрывом под знак), знак — ::after по центру. Никакой подложки
+           под знаком не нужно — разрыв в самой линии */
+        const gap = 'calc(50% - 0.9em), transparent calc(50% - 0.9em) calc(50% + 0.9em)';
+        const signBg = kind === 'sign'
+            ? `linear-gradient(90deg, ${hc} ${gap}, ${hc} calc(50% + 0.9em))`
+            : `linear-gradient(90deg, transparent, ${hc} ${gap}, ${hc} calc(50% + 0.9em), transparent)`;
+        put(S.hr(r), 'background-image', hrOn ? (kind === 'fade' ? `linear-gradient(90deg, transparent, ${hc}, transparent)` : sign ? signBg : 'none') : '');
         put(S.hr(r), 'background-color', hrOn && kind === 'solid' ? hc : '');
-        put(S.hr(r), 'height', hrOn ? (line ? '0' : `${ht}px`) : '');
-        put(S.hr(r), 'min-height', hrOn ? (line ? '0' : `${ht}px`) : '');
+        put(S.hr(r), 'height', hrOn ? (line ? '0' : sign ? '1.2em' : `${ht}px`) : '');
+        put(S.hr(r), 'min-height', hrOn ? (line ? '0' : sign ? '1.2em' : `${ht}px`) : '');
+        put(S.hr(r), 'background-size', sign ? `100% ${ht}px` : '');
+        put(S.hr(r), 'background-position', sign ? 'center' : '');
+        put(S.hr(r), 'background-repeat', sign ? 'no-repeat' : '');
+        put(S.hr(r), 'position', sign ? 'relative' : '');
+        put(S.hr(r), 'overflow', sign ? 'visible' : '');
+        put(S.hr(r), 'border', sign ? 'none' : '');
+        put(S.hr(r), '--vte-hr-sign', sign ? (v.hrSign || 'heart') : '');
+        const HA = S.hrA(r);
+        put(HA, 'content', sign ? `"${(HR_SIGNS.find(x => x[0] === (v.hrSign || 'heart')) || HR_SIGNS[0])[2]}"` : '');
+        put(HA, 'position', sign ? 'absolute' : '');
+        put(HA, 'left', sign ? '50%' : '');
+        put(HA, 'top', sign ? '50%' : '');
+        put(HA, 'transform', sign ? 'translate(-50%, -50%)' : '');
+        put(HA, 'line-height', sign ? '1' : '');
+        put(HA, 'font-size', sign ? '1em' : '');
+        put(HA, 'color', sign ? (v.hrSignColor || hc) : '');
         put(S.hr(r), 'border-top', hrOn && line ? `${ht}px ${kind} ${hc}` : '');
         put(S.hr(r), 'opacity', v?.hrOp ? String(r2(v.hrOp / 100)) : '');
+
+        textStyleRules(put, r, v);
+    });
+
+    /* ---------- текст целиком ---------- */
+    each('text', (r, v) => {
+        put(S.text(r), 'line-height', v?.tLh ? String(r2(v.tLh / 100)) : '');
+        put(S.text(r), 'letter-spacing', v?.tLetter ? `${r2(v.tLetter / 100)}em` : '');
+        put(S.text(r), 'hyphens', v?.tHyph ? 'auto' : '');
+        put(S.text(r), '-webkit-hyphens', v?.tHyph ? 'auto' : '');
+        // Тень под буквами ST рисует на каждом сообщении — без неё легче
+        put(S.text(r), 'text-shadow', v?.tNoShadow ? 'none' : '');
+        put(S.para(r), 'margin-bottom', v?.tPGap ? `${v.tPGap}px` : '');
+        put(S.para(r), 'text-indent', v?.tIndent ? `${r2(v.tIndent / 10)}em` : '');
     });
 
     /* ---------- положение текста ----------
@@ -778,12 +1087,47 @@ function buildRules(s) {
         put(S.edit(r), 'column-gap', px(v?.edGap));
         put(S.editBtn(r), 'height', px(v?.edSize));
         put(S.editBtn(r), 'font-size', v?.edSize ? `${Math.round(v.edSize * 0.5)}px` : '');
-        put(S.editBtn(r), 'opacity', v?.edOpacity ? String(r2(v.edOpacity / 100)) : '');
+        // Кнопки правки: цвет, фон и видимость — свои или как у основных
+        const same = !!v?.edSame;
+        put(S.editBtn(r), '--vte-same', same ? '1' : '');
+        put(S.editBtn(r), 'color', same ? (v.btnColor || '') : (v?.edColor || ''));
+        put(S.editBtn(r), 'background-color', same ? (v.btnBg || '') : (v?.edBg || ''));
+        put(S.editBtn(r), 'opacity', same
+            ? (v.btnOpacity ? String(r2(v.btnOpacity / 100)) : '')
+            : (v?.edOpacity ? String(r2(v.edOpacity / 100)) : ''));
         put(S.editBtn(r), 'border-radius', px(v?.edRadius));
+
+        /* Панель «…»: по умолчанию — как основные кнопки и едет с ними.
+           «Отдельно» — свой вид, своя видимость и свой сдвиг от места
+           (position: relative — соседей не толкает). display не трогаем */
+        const own = !!v?.exOwn;
+        const EX = S.extra(r);
+        const exX = own ? fluidSigned(v.exXMin, v.exXMax) : '';
+        const exY = own ? fluidSigned(v.exYMin, v.exYMax) : '';
+        put(EX, '--vte-own', own ? '1' : '');
+        put(EX, 'position', exX || exY ? 'relative' : '');
+        put(EX, 'left', exX);
+        put(EX, 'top', exY);
+        put(EX, 'z-index', exX || exY ? '6' : '');
+        put(EX, 'flex-direction', own ? (v.exDir || '') : '');
+        put(EX, 'align-items', own && v.exDir === 'column' ? 'center' : '');
+        put(EX, 'gap', own ? px(v.exGap) : '');
+        put(S.exBtn(r), 'font-size', own ? fluid(v.exSMin, v.exSMax) : '');
+        put(S.exBtn(r), 'color', own ? (v.exColor || '') : '');
+        put(S.exBtn(r), 'opacity', own && v.exOpacity ? String(r2(v.exOpacity / 100)) : '');
+        put(S.exHover(r), 'opacity', own && v.exHover ? String(r2(v.exHover / 100)) : '');
+        put(S.exBtn(r), 'background-color', own ? (v.exBg || '') : '');
+        put(S.exBtn(r), 'border-radius', own ? px(v.exRadius) : '');
+        put(S.exBtn(r), 'padding', own && v.exPad ? `${v.exPad}px ${Math.round(v.exPad * 1.5)}px` : '');
+
+        // Подложки под группами кнопок
+        panRules(put, S.btns(r), v, 'btn');
+        panRules(put, EX, own ? v : null, 'ex');
+        panRules(put, S.edit(r), v, 'ed');
     });
 
     // Опора для «в углу пузыря» (ник, кнопки) — одна строка на роль
-    for (const r of ROLES) put(S.box(r, 'block'), 'position', blockRel[r] ? 'relative' : '');
+    for (const r of ROLES) put(S.box(r, 'block'), 'position', blockRel[r] || trimRel[r] ? 'relative' : '');
 
     /* ---------- значки кнопок ---------- */
     for (const [, list] of GLYPHS) {
@@ -851,29 +1195,6 @@ function buildRules(s) {
         }
     }
 
-    /* ---------- декор по бокам чата ---------- */
-    for (const side of ['L', 'R']) {
-        const sel = DECOR[side];
-        const img = on ? s[`d${side}img`] : '';
-        const u = img ? `url("${String(img).replace(/["\\\n\r]/g, encodeURIComponent)}")` : '';
-        const n = (k) => r2(+s[`d${side}${k}`] || 0);
-        put(sel, 'content', img ? '""' : '');
-        put(sel, 'position', img ? 'absolute' : '');
-        put(sel, 'top', img ? '50%' : '');
-        put(sel, side === 'L' ? 'left' : 'right', img ? '0' : '');
-        put(sel, 'width', img ? `${n('w')}vw` : '');
-        put(sel, 'height', img ? `${n('h')}vw` : '');
-        put(sel, 'background-image', u);
-        put(sel, 'background-size', img ? 'contain' : '');
-        put(sel, 'background-position', img ? 'center' : '');
-        put(sel, 'background-repeat', img ? 'no-repeat' : '');
-        put(sel, 'transform', img ? `translate(${n('x')}vw, calc(-50% + ${n('y')}vw))${s[`d${side}flip`] ? ' scaleX(-1)' : ''}` : '');
-        put(sel, 'opacity', img && s[`d${side}op`] < 100 ? String(r2(s[`d${side}op`] / 100)) : '');
-        // Под открытыми панелями (но над чатом) или поверх всего
-        put(sel, 'z-index', img ? (s[`d${side}front`] ? '5' : '-1') : '');
-        put(sel, 'pointer-events', img ? 'none' : '');
-    }
-
     /* ---------- место справа, обрезка, промежутки ---------- */
     const rs = on && s.rightSpace;
     put(G.mes, '--mes-right-spacing', rs ? `${s.rightSpace}px` : '');
@@ -937,6 +1258,28 @@ function buildRules(s) {
     put(G.badges, 'background-color', on ? s.badgeBg : '');
     put(G.badges, 'border-radius', on && s.badgeRadius ? `${s.badgeRadius}px` : '');
     put(G.badges, 'padding', on && s.badgePad ? `${s.badgePad}px ${s.badgePad * 2}px` : '');
+
+    /* ---------- фон чата под пузырями ---------- */
+    {
+        const tint = on ? chatTint(s) : '';
+        const img = on ? s.cImg : '';
+        put(CHAT, 'background-color', img ? 'transparent' : tint);
+        put(CHAT, 'backdrop-filter', on && s.cNoBlur ? 'none' : '');
+        put(CHAT, '-webkit-backdrop-filter', on && s.cNoBlur ? 'none' : '');
+        for (const [sel, z] of [[CH_TINT, '28'], [CH_IMG, '29']]) {
+            put(sel, 'content', img ? '""' : '');
+            put(sel, 'position', img ? 'absolute' : '');
+            put(sel, 'inset', img ? '0' : '');
+            put(sel, 'z-index', img ? z : '');
+            put(sel, 'pointer-events', img ? 'none' : '');
+        }
+        put(CH_TINT, 'background-color', img ? (tint || CH_VAR) : '');
+        put(CH_IMG, 'background-image', img ? `url("${String(img).replace(/["\\\n\r]/g, encodeURIComponent)}")` : '');
+        put(CH_IMG, 'background-size', img ? (s.cFit === 'repeat' ? 'auto' : s.cFit) : '');
+        put(CH_IMG, 'background-repeat', img ? (s.cFit === 'repeat' ? 'repeat' : 'no-repeat') : '');
+        put(CH_IMG, 'background-position', img ? (s.cPos || 'center') : '');
+        put(CH_IMG, 'opacity', img && s.cImgOp < 100 ? String(r2(s.cImgOp / 100)) : '');
+    }
     return rules;
 }
 
@@ -1057,7 +1400,7 @@ function slider(key, min, max, unit, zeroText, hint, step = 1) {
         title: hint || '',
         on: {
             input: (e) => { setVal(key, +e.target.value); show(); preview(); },
-            change: () => commit(),
+            change: () => { commit(); if (/PanBw$/.test(key)) render(); },
         },
     });
     show();
@@ -1192,7 +1535,40 @@ function select(key, options, after) {
 }
 
 /* Какие разделы раскрыты */
-const open = { bubble: true, colors: false, text: false, names: false, buttons: false, decor: false, scroll: false, badges: false };
+const open = { bubble: true, colors: false, text: false, names: false, buttons: false, chatbg: false, scroll: false, badges: false };
+
+function chatBgUi() {
+    const img = !!state.cImg;
+    const url = h('input.vte-input.vte-tb-url', {
+        type: 'text', spellcheck: false, placeholder: 'https://… ссылка на картинку', value: state.cImg || '',
+        on: {
+            change: (e) => {
+                const v = e.target.value.trim();
+                if (v && !/^https?:\/\/[^\s"'()<>\\]+$/i.test(v) && !/^data:image\//i.test(v)) {
+                    say('Нужна ссылка http(s)://');
+                    e.target.value = state.cImg || '';
+                    return;
+                }
+                // Картинка появилась впервые — сразу без размытия: иначе ST её размоет
+                if (v && !state.cImg) state.cNoBlur = true;
+                setVal('cImg', v);
+                commit();
+                render();
+            },
+        },
+    });
+    return [
+        h('small.vte-note', { text: 'Фон ленты сообщений — то, что под пузырями.' }),
+        check('cNoBlur', 'Без размытия (легче)', 'ST размывает обои под чатом, и это пересчитывается при каждой прокрутке'),
+        row('Цвет фона', colorBtn('cColor', 'как в теме')),
+        row('Плотность фона', slider('cOp', 0, 100, '%', 'прозрачный'), '100% — как задано цветом, 0% — фона нет, видны обои'),
+        row('Картинка поверх', url),
+        img ? h('small.vte-note', { text: 'Картинка ложится поверх фона чата и под сообщения. Не прокручивается вместе с чатом.' }) : null,
+        img ? row('Видимость картинки', slider('cImgOp', 0, 100, '%', 'не видно')) : null,
+        img ? row('Как вписать', select('cFit', [['cover', 'заполнить'], ['contain', 'целиком'], ['repeat', 'плиткой']])) : null,
+        img ? row('Где', select('cPos', [['center', 'по центру'], ['top', 'сверху'], ['bottom', 'снизу'], ['left', 'слева'], ['right', 'справа']])) : null,
+    ];
+}
 
 function group(id, title, children) {
     const list = children.filter(Boolean);
@@ -1260,6 +1636,8 @@ function screen() {
             h('small.vte-note', { text: 'Внутренние отступы — от края пузыря до текста. Ник, текст и кнопки двигаются вместе с ними, ничего не наезжает.' }),
             row('Отступ сверху', slider('padT', 0, 60, 'px', 'как в теме')),
             row('Отступ снизу', slider('padB', 0, 60, 'px', 'как в теме')),
+            row('Обрезать фон сверху', slider('trimT', 0, 200, 'px', 'нет'), 'Фон начинается ниже края пузыря. Сам пузырь и текст не двигаются'),
+            row('Обрезать фон снизу', slider('trimB', 0, 200, 'px', 'нет'), 'Фон кончается выше края пузыря. Сам пузырь и текст не двигаются'),
             row('Отступ по бокам', slider('padX', 0, 60, 'px', 'как в теме')),
             row('Ширина пузыря', slider('maxW', 0, 100, '%', 'во всю ширину'),
                 'Считается от ширины чата — на телефоне и ПК пропорция одна'),
@@ -1285,10 +1663,26 @@ function screen() {
             row('Толщина полосы', slider('bqBarW', 0, 10, 'px', 'как в теме (3px)')),
             row('Фон цитаты', colorBtn('bqBg', 'как в теме')),
             h('div.vte-bb-shared', { text: 'Горизонтальная линия  (---)' }),
-            row('Вид', select('hrStyle', [['', 'как в теме'], ['fade', 'тающая к краям'], ['solid', 'сплошная'], ['dashed', 'пунктир'], ['dotted', 'точки']])),
+            row('Вид', select('hrStyle', [['', 'как в теме'], ['fade', 'тающая к краям'], ['solid', 'сплошная'], ['dashed', 'пунктир'], ['dotted', 'точки'],
+                ['sign', 'сплошная, знак посередине'], ['signFade', 'тающая, знак посередине']], render)),
+            /^sign/.test(val('hrStyle')) ? row('Знак', select('hrSign', HR_SIGNS)) : null,
+            /^sign/.test(val('hrStyle')) ? row('Цвет знака', colorBtn('hrSignColor', 'как у линии')) : null,
             row('Цвет линии', colorBtn('hrColor', 'как в теме')),
             row('Толщина', slider('hrThick', 0, 8, 'px', 'как в теме (1px)')),
             row('Видимость', slider('hrOp', 0, 100, '%', 'как в теме (40%)')),
+            h('div.vte-bb-shared', { text: 'Вид разметки — готовые шаблоны' }),
+            row('Готовый набор', textSetSelect(), 'Сразу для кавычек, курсива, жирного, подчёркнутого, цитаты и кода. Потом любой можно поменять отдельно'),
+            ...Object.entries(TEXT_STYLES).flatMap(([el, def]) => {
+                const cur = def.list[val(TS_KEY[el])];
+                const pre = TS_PRE[el];
+                return [
+                    row(def.title, select(TS_KEY[el], [['', 'как в теме'], ...Object.entries(def.list).map(([k, x]) => [k, x[0]])], render)),
+                    cur && JSON.stringify(cur[1]).includes('--vte-ta') || cur?.[2] ? row('   цвет линий и значков', colorBtn(`${pre}Acc`, 'от цвета текста')) : null,
+                    cur && cur[3] ? row('   цвет подложки', colorBtn(`${pre}Fill`, 'полупрозрачный от текста')) : null,
+                ];
+            }),
+            h('small.vte-note', { text: 'Шаблоны лёгкие: линии, заливка цветом и тонкие рамки — без анимаций, градиентов и размытых теней. '
+                + 'Цвет берут от самого текста, так что подходят к цветам выше.' }),
             h('div.vte-bb-shared', { text: 'Проверить на деле' }),
             h('button.vte-btn', {
                 type: 'button', title: 'Скопировать сообщение со всеми видами разметки — вставьте его в чат и смотрите, как выглядит',
@@ -1312,6 +1706,13 @@ function screen() {
             row('Выравнивание', select('textAlign', [
                 ['', 'как в теме'], ['left', 'по левому краю'], ['center', 'по центру'], ['right', 'по правому краю'], ['justify', 'по ширине'],
             ], render), 'Выравнивает строки и ставит сам блок текста в пузыре слева, по центру или справа'),
+            h('div.vte-bb-shared', { text: 'Текст целиком' }),
+            row('Межстрочный', slider('tLh', 80, 260, '%', 'как в теме', 'Расстояние между строками. 150% — полтора интервала', 5)),
+            row('Между абзацами', slider('tPGap', 0, 40, 'px', 'как в теме')),
+            row('Красная строка', slider('tIndent', 0, 40, '', 'нет', 'Отступ первой строки абзаца (десятые доли размера букв)')),
+            row('Между буквами', slider('tLetter', -5, 20, '', 'как в теме', 'Сотые доли размера букв: 5 — чуть шире, −2 — плотнее')),
+            check('tHyph', 'Переносы слов', 'Длинные слова делятся по слогам — особенно помогает с выравниванием «по ширине»'),
+            check('tNoShadow', 'Без тени под буквами (легче)'),
         ]),
 
         group('names', 'Ник и дата', [
@@ -1338,9 +1739,9 @@ function screen() {
             row('Цвет даты', colorBtn('dateColor', 'как в теме')),
         ]),
 
-        group('buttons', 'Кнопки сообщения', buttonsUi()),
+        group('buttons', 'Кнопки редактирования', buttonsUi()),
 
-        group('decor', 'Декор по бокам чата', decorUi()),
+        group('chatbg', 'Фон чата (под пузырями)', chatBgUi()),
 
         group('scroll', 'Полоса прокрутки', scrollUi()),
 
@@ -1387,10 +1788,10 @@ function screen() {
    КНОПКИ СООБЩЕНИЯ — интерфейс
 ============================================================ */
 const PLACES = [
-    ['', 'как в теме'],
-    ['row', 'в строке ника (сдвинуть от своего места)'],
+    ['', 'как в теме (в строке ника)'],
+    ['block', 'в углу пузыря — сами по себе, ник не влияет'],
+    ['row', 'в строке ника, сдвинуть от своего места'],
     ['after', 'сразу после ника и даты'],
-    ['block', 'в углу блока с текстом'],
 ];
 const CORNERS = [['top-right', 'сверху справа'], ['top-left', 'сверху слева'], ['bottom-right', 'снизу справа'], ['bottom-left', 'снизу слева']];
 
@@ -1422,6 +1823,57 @@ function placeRows(pre, title) {
     ];
 }
 
+/** Готовый набор: все виды разметки одним шагом */
+function textSetSelect() {
+    const sel = h('select.vte-tb-select', {
+        on: {
+            change: (e) => {
+                const set = TEXT_SETS.find(x => x[0] === e.target.value);
+                if (!set) return;
+                for (const [el, name] of Object.entries(set[2])) setVal(TS_KEY[el], name);
+                commit();
+                render();
+                say(set[0] === 'clear' ? 'Шаблоны разметки убраны' : `Набор «${set[1].replace(/ —.*$/, '').replace(/[«»]/g, '')}»`);
+            },
+        },
+    }, [h('option', { value: '', text: 'выбрать…' }), ...TEXT_SETS.map(([k, t]) => h('option', { value: k, text: t }))]);
+    return sel;
+}
+
+/* Подложка под группой кнопок: фон, насколько он больше кнопок, рамка */
+function panUi(pre) {
+    const bw = val(`${pre}PanBw`);
+    return [
+        row('Подложка под кнопками', colorBtn(`${pre}PanBg`, 'нет'), 'Общий фон под всей группой кнопок'),
+        row('Подложка больше на', slider(`${pre}PanPad`, 0, 20, 'px', 'вплотную'), 'Фон выходит за кнопки на столько с каждой стороны — сами кнопки не сдвигаются'),
+        row('Рамка подложки', slider(`${pre}PanBw`, 0, 6, 'px', 'нет')),
+        bw ? row('Линия', select(`${pre}PanBs`, LINE_STYLES)) : null,
+        bw ? row('Цвет рамки', colorBtn(`${pre}PanBc`, 'цвет значков')) : null,
+        row('Скругление подложки', slider(`${pre}PanRad`, 0, 30, 'px', 'нет')),
+    ];
+}
+
+/** «Отдельно от основных»: при включении панель начинает с тех же значений */
+function exOwnCheck() {
+    const input = h('input', {
+        type: 'checkbox', checked: !!val('exOwn'),
+        on: {
+            change: (e) => {
+                if (e.target.checked) {
+                    for (const k of ['SMin', 'SMax', 'Color', 'Opacity', 'Hover', 'Bg', 'Radius', 'Pad', 'Gap']) {
+                        if (!val(`ex${k}`)) setVal(`ex${k}`, val(`btn${k}`));
+                    }
+                }
+                setVal('exOwn', e.target.checked);
+                commit();
+                render();
+            },
+        },
+    });
+    return h('label.vte-tb-check', { title: 'Иначе панель выглядит как основные кнопки и едет вместе с ними' },
+        [input, h('span', { text: 'Отдельно от основных кнопок' })]);
+}
+
 function buttonsUi() {
     return [
         roleBar('buttons'),
@@ -1448,14 +1900,36 @@ function buttonsUi() {
         row('Внутренний отступ', slider('btnPad', 0, 12, 'px', 'как в теме')),
         row('Между кнопками', slider('btnGap', 0, 24, 'px', 'как в теме')),
         check('btnNoShadow', 'Без тени под значками (легче)'),
+        ...panUi('btn'),
 
-        h('div.vte-bb-shared', { text: 'Кнопки в режиме правки' }),
+        h('div.vte-bb-shared', { text: 'Панель «…» (открывается кнопкой «…»)' }),
+        exOwnCheck(),
+        ...(val('exOwn') ? [
+            pair('Сдвиг вбок', 'exXMin', 'exXMax', 400, 'От своего места. Первое — на телефоне, второе — на ПК', -400, 'нет'),
+            pair('Сдвиг вверх-вниз', 'exYMin', 'exYMax', 400, 'Минус — выше', -400, 'нет'),
+            row('Раскладка', select('exDir', [['', 'как у основных'], ['row', 'в строку'], ['column', 'столбиком']])),
+            pair('Размер значков', 'exSMin', 'exSMax', 40),
+            row('Цвет', colorBtn('exColor', 'как в теме')),
+            row('Видимость', slider('exOpacity', 0, 100, '%', 'как в теме')),
+            row('При наведении', slider('exHover', 0, 100, '%', 'как в теме')),
+            row('Фон кнопок', colorBtn('exBg', 'нет')),
+            row('Скругление', slider('exRadius', 0, 20, 'px', 'нет')),
+            row('Внутренний отступ', slider('exPad', 0, 12, 'px', 'как в теме')),
+            row('Между кнопками', slider('exGap', 0, 24, 'px', 'как в теме')),
+            ...panUi('ex'),
+        ] : []),
+
+        h('div.vte-bb-shared', { text: 'Кнопки в режиме правки (открываются карандашом)' }),
         magnet('Привязать к ближайшему', () => anchorButtons('ed'), 'То же для кнопок правки'),
         ...placeRows('ed', 'Где стоят'),
+        check('edSame', 'Цвет, фон и видимость — как у основных кнопок'),
         row('Размер кнопок', slider('edSize', 0, 60, 'px', 'как в теме')),
-        row('Видимость', slider('edOpacity', 0, 100, '%', 'как в теме (50%)')),
+        val('edSame') ? null : row('Цвет', colorBtn('edColor', 'как в теме')),
+        val('edSame') ? null : row('Фон кнопок', colorBtn('edBg', 'как в теме')),
+        val('edSame') ? null : row('Видимость', slider('edOpacity', 0, 100, '%', 'как в теме (50%)')),
         row('Скругление', slider('edRadius', 0, 30, 'px', 'как в теме')),
         row('Между кнопками', slider('edGap', 0, 24, 'px', 'как в теме')),
+        ...panUi('ed'),
 
         h('div.vte-bb-shared', { text: 'Значки — общие для бота и пользователя' }),
         ...GLYPHS.map(([title, list]) => h('div.vte-bb-glyphs', {}, [
@@ -1779,46 +2253,6 @@ async function anchorBadges() {
 const magnet = (text, fn, hint) => h('button.vte-btn.vte-bb-magnet', { type: 'button', title: hint, on: { click: fn } },
     [icon('fa-magnet'), h('span', { text: ` ${text}` })]);
 
-/* ============================================================
-   ДЕКОР ПО БОКАМ ЧАТА — интерфейс
-============================================================ */
-function decorUrl(key) {
-    const input = h('input.vte-input.vte-tb-url', {
-        type: 'text', spellcheck: false, placeholder: 'https://… ссылка на картинку', value: val(key) || '',
-        on: {
-            change: (e) => {
-                const v = e.target.value.trim();
-                if (v && !/^https?:\/\/[^\s"'()<>\\]+$/i.test(v) && !/^data:image\//i.test(v)) {
-                    say('Нужна ссылка http(s)://');
-                    e.target.value = val(key) || '';
-                    return;
-                }
-                setVal(key, v);
-                commit();
-                render();
-            },
-        },
-    });
-    return input;
-}
-
-function decorSide(side, title) {
-    const k = (x) => `d${side}${x}`;
-    const on = !!val(k('img'));
-    return [
-        h('div.vte-bb-shared', { text: title }),
-        row('Картинка', decorUrl(k('img')), 'Пока только ссылкой. Как фон — работает с любого сайта'),
-        on ? row('Ширина', slider(k('w'), 1, 150, 'vw', '—', 'Доля ширины окна браузера: не меняется при масштабе', 0.5)) : null,
-        on ? row('Высота', slider(k('h'), 1, 150, 'vw', '—', '', 0.5)) : null,
-        on ? row('Вбок', slider(k('x'), -80, 80, 'vw', 'у края', side === 'L' ? 'Минус — наружу, за левый край чата' : 'Плюс — наружу, за правый край чата', 0.5)) : null,
-        on ? row('Вверх-вниз', slider(k('y'), -40, 120, 'vw', 'посередине полосы', 'От середины полосы со значками. Плюс — ниже', 0.5)) : null,
-        on ? row('Непрозрачность', slider(k('op'), 5, 100, '%', '100%')) : null,
-        on ? check(k('flip'), 'Отразить по горизонтали') : null,
-        on ? check(k('front'), 'Поверх открытых панелей',
-            'Обычно декор лежит над чатом, но под открытыми панелями ST — чтобы их не загораживать') : null,
-    ];
-}
-
 function scrollUi() {
     const hideAll = val('sbHide') === 'both';
     const styleOk = !hideAll && val('sbWhere') !== val('sbHide');
@@ -1848,17 +2282,6 @@ function scrollUi() {
         styleOk ? row('Своя картинка', urlInput, 'PNG ссылкой — встаёт на ползунок вместо цвета') : null,
         styleOk && val('sbImg') ? row('Как вписать', select('sbFit', [['stretch', 'растянуть по ползунку'], ['contain', 'целиком, без искажений']])) : null,
         styleOk ? h('small.vte-note', { text: 'Картинка и скругление видны в Chrome, Edge, Opera, Яндекс и на Android. Firefox умеет только цвета.' }) : null,
-    ];
-}
-
-function decorUi() {
-    return [
-        h('small.vte-note', {
-            text: 'Картинки держатся за левый и правый край чата. Меняешь ширину чата в таверне — едут вместе с ним; '
-                + 'при масштабе браузера (Ctrl +/−) не меняются. Начальное положение — как в примере темы.',
-        }),
-        ...decorSide('L', 'Слева'),
-        ...decorSide('R', 'Справа'),
     ];
 }
 

@@ -1028,6 +1028,11 @@ const AUTO_GROUPS = [
         test: (s) => s === ':root' || s.startsWith(':root'),
     },
     {
+        id: 'decor',
+        title: 'Декор',
+        test: (s) => /^(html|body|#movingDivs)::(before|after)$|^#top-settings-holder::(before|after)$/.test(s),
+    },
+    {
         id: 'base',
         title: 'Основа',
         test: (s) => /^(html|body|\*)\b/.test(s),
@@ -1036,6 +1041,11 @@ const AUTO_GROUPS = [
         id: 'scroll',
         title: 'Прокрутка',
         test: (s) => /scrollbar|-webkit-resizer/i.test(s),
+    },
+    {
+        id: 'ranges',
+        title: 'Ползунки',
+        test: (s) => /\[type="?range"?\]|slider-thumb|range-thumb|neo-range-slider/i.test(s),
     },
     {
         id: 'send',
@@ -1065,17 +1075,18 @@ const AUTO_GROUPS = [
     {
         id: 'chat',
         title: 'Чат',
-        test: (s) => /#chat\b|\.mes\b|\.mes[_-]|#chat_|swipe|\.last_mes|#bg1|#bg_custom/i.test(s),
+        test: (s) => /#chat\b|\.mes\b|\.mes[_-]|#chat_|swipe|\.last_mes|#bg1|#bg_custom|#sheld/i.test(s),
     },
     {
         id: 'avatar',
         title: 'Аватарки',
-        test: (s) => /avatar|persona|#user_avatar_block/i.test(s),
+        // Сама панель «Персоны» (#PersonaManagement) — это раздел «Панели»
+        test: (s) => /avatar|persona|#user_avatar_block/i.test(s) && !/^#PersonaManagement$/.test(s),
     },
     {
         id: 'panels',
         title: 'Панели',
-        test: (s) => /#right-nav-panel|#left-nav-panel|#WorldInfo|#rm_|drawer-content|#extensions_settings|#character_popup|inline-drawer/i.test(s),
+        test: (s) => /#right-nav-panel|#left-nav-panel|#WorldInfo|#rm_|drawer-content|#extensions_settings|#character_popup|inline-drawer|#AdvancedFormatting|#user-settings-block|#Backgrounds|#PersonaManagement|#floatingPrompt|#cfgConfig|#logprobsViewer|#completion_prompt_manager_popup/i.test(s),
     },
     {
         id: 'popups',

@@ -17,6 +17,8 @@ let onRedo = null;
 let onOpenTemplates = null;
 let onToggleCode = null;
 let isCodeOpen = null;
+let onDockMenu = null;   // (кнопка) => меню «где окно редактора»
+let isDocked = null;
 let onDone = null;
 let picker = null;
 // Лёгкий режим: не предлагать размытие и градиенты, тени — до 10px
@@ -282,6 +284,8 @@ export function init(options = {}) {
     onOpenTemplates = options.onOpenTemplates || null;
     onToggleCode = options.onToggleCode || null;
     isCodeOpen = options.isCodeOpen || null;
+    onDockMenu = options.onDockMenu || null;
+    isDocked = options.isDocked || null;
     onDone = options.onDone || null;
     onTextApply = options.onTextApply || null;
     picker = options.picker || null;
@@ -419,10 +423,20 @@ export function createPanel() {
             () => setZoom(ui.zoom + ZOOM_STEP)),
     ]);
 
+    // Где окно редактора: отдельно или рядом с панелью кода
+    els.dockBtn = onDockMenu
+        ? h('button.vte-icon-btn', {
+            type: 'button', title: 'Положение окна: отдельно или рядом с панелью кода',
+            dataset: { tool: 'dock' },
+            on: { click: (e) => onDockMenu(e.currentTarget) },
+        }, [icon('fa-table-columns')])
+        : null;
+
     els.header = h('div#vte-header.vte-header', {}, [
         els.title,
         h('div.vte-header-btns', {}, [
             els.zoomBox,
+            els.dockBtn,
             h('span.vte-header-sep'),
             onToggleCode
                 ? (els.codeBtn = iconBtn('fa-code', 'Открыть или закрыть панель кода', () => { onToggleCode(); syncCodeBtn(); }))
@@ -593,6 +607,7 @@ export function createPanel() {
 /** Кнопка кода в шапке — подсвечена, пока панель кода открыта */
 function syncCodeBtn() {
     try { els.codeBtn?.classList.toggle('active', !!isCodeOpen?.()); } catch {}
+    try { els.dockBtn?.classList.toggle('active', !!isDocked?.()); } catch {}
 }
 
 export function hidePanel() {
@@ -2133,7 +2148,10 @@ function makeDraggable(box, handle) {
         active = true;
         const r = box.getBoundingClientRect();
         sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+        // bottom мог остаться от присоединения «над кодом» — тогда окно
+        // растягивалось между top и bottom
         box.style.right = 'auto';
+        box.style.bottom = 'auto';
         box.style.left = `${ox}px`;
         box.style.top = `${oy}px`;
         handle.setPointerCapture(e.pointerId);
