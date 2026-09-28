@@ -64,11 +64,11 @@ function persist() {
 /* ============================================================
    ЗАГРУЗКА МОДУЛЕЙ
 ============================================================ */
-let selector, inspector, generator, fonts, editor, picker, rules, templates, perf, topbar, headers, avatars, gallery, bubbles, bottombar, panels, decor;
+let selector, inspector, generator, fonts, editor, picker, rules, templates, perf, topbar, headers, avatars, gallery, bubbles, bottombar, panels, decor, recolor;
 
 async function loadModules() {
     const load = (name) => import(`${BASE}/modules/${name}.js`);
-    [selector, inspector, generator, fonts, editor, picker, rules, templates, perf, topbar, headers, avatars, gallery, bubbles, bottombar, panels, decor] = await Promise.all([
+    [selector, inspector, generator, fonts, editor, picker, rules, templates, perf, topbar, headers, avatars, gallery, bubbles, bottombar, panels, decor, recolor] = await Promise.all([
         load('selector'),
         load('inspector'),
         load('cssGenerator'),
@@ -86,6 +86,7 @@ async function loadModules() {
         load('bottomBar'),
         load('panels'),
         load('decor'),
+        load('recolor'),
     ]);
 }
 
@@ -135,7 +136,7 @@ function restoreFor(id) {
 
 /** Окна инструментов читают CSS при открытии — после правок обновляем их */
 function refreshTools() {
-    for (const tool of [topbar, headers, avatars, gallery, bubbles, bottombar, panels, decor]) {
+    for (const tool of [topbar, headers, avatars, gallery, bubbles, bottombar, panels, decor, recolor]) {
         // у «Пузырей» есть второе окно — «Markdown»
         try { if (tool?.isOpen?.() || tool?.isMarkdownOpen?.()) tool.refresh?.(); } catch {}
     }
@@ -379,6 +380,7 @@ function deactivate() {
     bottombar?.hidePanel?.();
     panels?.hidePanel?.();
     decor?.hidePanel?.();
+    recolor?.hidePanel?.();
     bubbles?.hideMarkdown?.();
     gallery?.hidePanel?.();
     // cleanup вместо stopPreview: снимает ещё и наблюдатель видимости
@@ -1210,6 +1212,17 @@ function readRulesForTools() {
     return out;
 }
 
+/* Что относится к окну — по самому селектору. Живые элементы не нужны:
+   правило про кнопку «стоп» видно, даже когда генерации нет */
+const WINDOW_TESTS = {
+    top: (s) => /#top-bar\b|#top-settings-holder\b|\.drawer-icon\b|DrawerIcon\b|\.drawer-toggle\b|#extensionTopBar/.test(s),
+    bottom: (s) => /#send_form|#send_textarea|#leftSendForm|#rightSendForm|#nonQRFormItems|#options_button|#send_but|#mes_stop|\.mes_stop\b|#extensionsMenuButton|#form_sheld|#mes_impersonate|#mes_continue|#qr--bar|#file_form|#stscript_/.test(s),
+    panels: (s) => /drawer-content|#left-nav-panel|#right-nav-panel|#rm_api_block|#AdvancedFormatting|#WorldInfo|#user-settings-block|#Backgrounds|#rm_extensions_block|#PersonaManagement|\.menu_button\b|\[type="?range|range-slider|#floatingPrompt|#cfgConfig|#logprobsViewer/.test(s),
+    gallery: (s) => /character_select|#rm_print_characters_block|#user_avatar_block|hotswap|avatars_inline|avatar-container|#HotSwapWrapper|\.group_select\b/.test(s),
+    avatars: (s) => /mesAvatarWrapper|(\.mes\b|#chat\b)[^,]*\.avatar\b/.test(s),
+    headers: (s) => /inline-drawer-header|standoutHeader|(^|[\s>+~(,])h[1-6]\b/.test(s),
+};
+
 /** Что нужно спискам правил: метки, «перекрыто», свойства для подписи */
 function ruleExtras(rule) {
     let over = null;
@@ -1255,13 +1268,18 @@ function overriddenInfo() {
         if (!m.has(k)) m.set(k, rules.declarationMap(idx, el, ps || null, { includeAuto: true }));
         return m.get(k);
     };
-    // Победитель под @media / @supports — на другом экране его может не
-    // быть, и тогда строка темы снова работает. Такие строки не лишние
-    const conditional = new Set();
+    /* Перекрытой считаем строку темы, только если её побеждают «Мои
+       правки» (без @media / @supports — на другом экране правка могла бы
+       не действовать). Споры правил самой темы между собой не судим:
+       на сложных селекторах (:is, :has, !important в разных местах)
+       легко ошибиться и удалить нужное — проверка на чужих темах это
+       показала */
+    const mineWins = new Set();
     for (const r of idx.rules) {
-        if (!r.conditions?.length) continue;
-        for (const p of r.parts) for (const d of r.decls) conditional.add(`${p.raw}|${d.prop.toLowerCase()}|${d.value}`);
+        if (!r.inAutoBlock || r.conditions?.length) continue;
+        for (const p of r.parts) for (const d of r.decls) mineWins.add(`${p.raw}|${d.prop.toLowerCase()}|${d.value}`);
     }
+    if (!mineWins.size) { overCache = { css, map }; return map; }
     for (const rule of idx.rules) {
         if (rule.inAutoBlock || inPerf(rule, pb)) continue;
         try { if (!rules.isContextActive(rule)) continue; } catch { continue; }   // спящий @media — не судим
@@ -1283,8 +1301,7 @@ function overriddenInfo() {
             for (const [part, els] of partEls) {
                 for (const el of els) {
                     const w = dm(el, part.pseudo).get(prop);
-                    if (!w || (w.selector === part.raw && w.value === d.value)
-                        || conditional.has(`${w.selector}|${prop}|${w.value}`)) { wins = true; break; }
+                    if (!w || !mineWins.has(`${w.selector}|${prop}|${w.value}`)) { wins = true; break; }
                 }
                 if (wins) break;
             }
@@ -2247,7 +2264,7 @@ function updateFloatBtn() {
     if (!cfg().floatBtn) { b?.remove(); return; }
     if (!b) {
         b = h('div#vte-float-btn', { title: 'Редактор темы: включить и открыть код / выключить', role: 'button', tabindex: '0' },
-            [icon('fa-wand-magic-sparkles')]);
+            [icon('fa-paintbrush')]);
         try {
             const p = JSON.parse(localStorage.getItem(FLOAT_KEY) || 'null');
             if (p) { b.style.left = `${p.x}px`; b.style.top = `${p.y}px`; b.style.right = 'auto'; b.style.bottom = 'auto'; }
@@ -3318,6 +3335,10 @@ async function boot() {
               title: 'Текст в сообщениях: размер, цвет, интервалы, фон под абзацами — и разметка: курсив, жирный, кавычки, цитаты, код, линия',
               onClick: () => bubbles.toggleMarkdown(),
               isActive: () => !!bubbles.isMarkdownOpen?.() },
+            { id: 'recolor', icon: 'fa-palette', label: 'Перекраска',
+              title: 'Все цвета из кода темы по разделам — нажмите на цвет и выберите новый',
+              onClick: () => recolor.togglePanel(),
+              isActive: () => !!recolor.isOpen?.() },
             { id: 'decorwin', icon: 'fa-shapes', label: 'Декор',
               title: 'Картинки и значки поверх таверны: двигать, растягивать, вращать прямо на странице. Здесь же декор по бокам чата',
               onClick: () => decor.togglePanel(),
@@ -3389,7 +3410,7 @@ async function boot() {
         onSnapshot: () => snapshotFor('gallery'),
         onRestore: () => restoreFor('gallery'),
         onReadRules: () => readRulesForTools(),
-        onThemeRules: themeRulesForParts,
+        onThemeRules: () => themeRulesMatching(WINDOW_TESTS.gallery),
         onReveal: (from, to) => {
             if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
             setTimeout(() => editor.revealRange?.(from, to, { focus: true, hold: 4000 }), 60);
@@ -3405,7 +3426,7 @@ async function boot() {
         onSnapshot: () => snapshotFor('avatars'),
         onRestore: () => restoreFor('avatars'),
         onReadRules: () => readRulesForTools(),
-        onThemeRules: themeRulesForParts,
+        onThemeRules: () => themeRulesMatching(WINDOW_TESTS.avatars),
         onReveal: (from, to) => {
             if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
             setTimeout(() => editor.revealRange?.(from, to, { focus: true, hold: 4000 }), 60);
@@ -3421,7 +3442,20 @@ async function boot() {
         onSnapshot: () => snapshotFor('bottombar'),
         onRestore: () => restoreFor('bottombar'),
         onReadRules: () => readRulesForTools(),
-        onThemeRules: themeRulesForParts,
+        onThemeRules: () => themeRulesMatching(WINDOW_TESTS.bottom),
+        onReveal: (from, to) => {
+            if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
+            setTimeout(() => editor.revealRange?.(from, to, { focus: true, hold: 4000 }), 60);
+        },
+        onToast: (t) => toast(t),
+        picker,
+    });
+
+    recolor.init({
+        onReadCSS: () => customCSS || readCSS(),
+        onWriteCSS: (css) => writeCSS(css),
+        onSnapshot: () => snapshotFor('recolor'),
+        onRestore: () => restoreFor('recolor'),
         onReveal: (from, to) => {
             if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
             setTimeout(() => editor.revealRange?.(from, to, { focus: true, hold: 4000 }), 60);
@@ -3453,7 +3487,7 @@ async function boot() {
         onSnapshot: () => snapshotFor('panels'),
         onRestore: () => restoreFor('panels'),
         onReadRules: () => readRulesForTools(),
-        onThemeRules: themeRulesForParts,
+        onThemeRules: () => themeRulesMatching(WINDOW_TESTS.panels),
         onReveal: (from, to) => {
             if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
             setTimeout(() => editor.revealRange?.(from, to, { focus: true, hold: 4000 }), 60);
@@ -3489,7 +3523,7 @@ async function boot() {
         onSnapshot: () => snapshotFor('headers'),
         onRestore: () => restoreFor('headers'),
         onReadRules: () => readRulesForTools(),
-        onThemeRules: themeRulesForParts,
+        onThemeRules: () => themeRulesMatching(WINDOW_TESTS.headers),
         onReveal: (from, to) => {
             if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
             setTimeout(() => editor.revealRange?.(from, to, { focus: true, hold: 4000 }), 60);
@@ -3504,7 +3538,7 @@ async function boot() {
         onApply: applyToolRules,
         onSnapshot: () => snapshotFor('topbar'),
         onRestore: () => restoreFor('topbar'),
-        onThemeRules: themeTopbarRules,
+        onThemeRules: () => themeRulesMatching(WINDOW_TESTS.top),
         onIconRules: themeIconRules,
         onRevealMany: (list) => {
             if (!editor.isOpen?.()) { editor.showPanel(); editor.setContent(customCSS); }
